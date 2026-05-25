@@ -1,0 +1,54 @@
+0 verbose cli /usr/local/bin/node /usr/local/bin/npm
+1 info using npm@11.12.1
+2 info using node@v24.15.0
+3 silly config load:file:/usr/local/lib/node_modules/npm/npmrc
+4 silly config load:file:/Users/sergiusz/Documents/repo/transcribe/.npmrc
+5 silly config load:file:/Users/sergiusz/.npmrc
+6 silly config load:file:/usr/local/etc/npmrc
+7 verbose title npm install
+8 verbose argv "install" "--cache" "./npm-cache"
+9 verbose logfile logs-max:10 dir:/Users/sergiusz/Documents/repo/transcribe/npm-cache/_logs/2026-05-25T13_23_41_625Z-
+10 verbose logfile /Users/sergiusz/Documents/repo/transcribe/npm-cache/_logs/2026-05-25T13_23_41_625Z-debug-0.log
+11 silly logfile start cleaning logs, removing 1 files
+12 silly packumentCache heap:4496293888 maxSize:1124073472 maxEntrySize:562036736
+13 silly logfile done cleaning log files
+14 silly idealTree buildDeps
+15 silly reify moves {}
+16 silly audit bulk request {
+16 silly audit   '@babel/runtime': [ '7.29.2' ],
+16 silly audit   'ansi-regex': [ '5.0.1' ],
+16 silly audit   'ansi-styles': [ '4.3.0' ],
+16 silly audit   chalk: [ '4.1.2' ],
+16 silly audit   'supports-color': [ '7.2.0', '8.1.1' ],
+16 silly audit   cliui: [ '8.0.1' ],
+16 silly audit   'color-convert': [ '2.0.1' ],
+16 silly audit   'color-name': [ '1.1.4' ],
+16 silly audit   concurrently: [ '8.2.2' ],
+16 silly audit   'date-fns': [ '2.30.0' ],
+16 silly audit   'emoji-regex': [ '8.0.0' ],
+16 silly audit   escalade: [ '3.2.0' ],
+16 silly audit   'get-caller-file': [ '2.0.5' ],
+16 silly audit   'has-flag': [ '4.0.0' ],
+16 silly audit   'is-fullwidth-code-point': [ '3.0.0' ],
+16 silly audit   lodash: [ '4.18.1' ],
+16 silly audit   'require-directory': [ '2.1.1' ],
+16 silly audit   rxjs: [ '7.8.2' ],
+16 silly audit   'shell-quote': [ '1.8.4' ],
+16 silly audit   'spawn-command': [ '0.0.2' ],
+16 silly audit   'string-width': [ '4.2.3' ],
+16 silly audit   'strip-ansi': [ '6.0.1' ],
+16 silly audit   'tree-kill': [ '1.2.2' ],
+16 silly audit   tslib: [ '2.8.1' ],
+16 silly audit   'wrap-ansi': [ '7.0.0' ],
+16 silly audit   y18n: [ '5.0.8' ],
+16 silly audit   yargs: [ '17.7.2' ],
+16 silly audit   'yargs-parser': [ '21.1.1' ]
+16 silly audit }
+17 http fetch POST 200 https://registry.npmjs.org/-/npm/v1/security/advisories/bulk 954ms
+18 silly audit report {}
+19 verbose cwd /Users/sergiusz/Documents/repo/transcribe
+20 verbose os Darwin 25.5.0
+21 verbose node v24.15.0
+22 verbose npm  v11.12.1
+23 verbose exit 0
+24 info ok
