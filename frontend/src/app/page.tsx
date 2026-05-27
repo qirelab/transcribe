@@ -115,7 +115,11 @@ export default function Home() {
     return () => clearInterval(interval);
   }, [selectedRecord]);
 
-  const handleSelectRecord = async (id: string) => {
+  const handleSelectRecord = async (id: string | null) => {
+    if (id === null) {
+      setSelectedRecord(null);
+      return;
+    }
     try {
       const record = await transcribeApi.getTranscriptStatus(id);
       setSelectedRecord(record);
@@ -184,12 +188,14 @@ export default function Home() {
                 record={selectedRecord}
                 currentTimeMs={currentTimeMs}
                 onSeek={handleSeek}
+                onBack={() => setSelectedRecord(null)}
                 onUpdateRecord={(updated) => {
                   setSelectedRecord(updated);
                   setHistory((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
                 }}
               />
               <CustomAudioPlayer
+                recordId={selectedRecord.id}
                 duration={selectedRecord.duration || 0}
                 seekTrigger={seekTrigger}
                 onTimeUpdate={(ms) => setCurrentTimeMs(ms)}

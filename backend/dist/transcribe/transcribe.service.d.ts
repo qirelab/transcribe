@@ -13,4 +13,5 @@ export declare class TranscribeService implements OnModuleDestroy {
     startTranscription(filePath: string, fileName: string): Promise<string>;
     checkStatusAndProcess(id: string): Promise<TranscriptRecord>;
     private generateAISummaryAndChapters;
+    getAudioFilePath(id: string): string | null;
 }

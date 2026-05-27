@@ -15,10 +15,11 @@ export declare class TranscribeController {
     deleteRecord(id: string): {
         success: boolean;
     };
+    getAudio(id: string, res: Response): Promise<void>;
     renameSpeaker(body: {
         id: string;
         speaker: string;
         name: string;
     }): import("../database/database.service").TranscriptRecord;
-    exportTranscript(id: string, format: string, res: Response): Response<any, Record<string, any>>;
+    exportTranscript(id: string, format: string, res: Response): Promise<Response<any, Record<string, any>> | undefined>;
 }

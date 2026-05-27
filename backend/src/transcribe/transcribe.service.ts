@@ -142,7 +142,8 @@ export class TranscribeService implements OnModuleDestroy {
     const transcript = await client.transcripts.submit({
       audio_url: uploadUrl,
       speaker_labels: true,
-    });
+      speech_models: ['universal-3-pro', 'universal-2'],
+    } as any);
 
     const record: TranscriptRecord = {
       id: transcript.id,
@@ -154,6 +155,20 @@ export class TranscribeService implements OnModuleDestroy {
 
     this.dbService.saveTranscript(record);
     this.logger.log(`Transcription job submitted with ID: ${transcript.id}`);
+
+    // Save a copy of the audio file in uploads for playback stream
+    try {
+      const ext = path.extname(fileToUpload) || '.mp3';
+      const uploadsDir = path.join(process.cwd(), 'uploads');
+      if (!fs.existsSync(uploadsDir)) {
+        fs.mkdirSync(uploadsDir, { recursive: true });
+      }
+      const savedAudioPath = path.join(uploadsDir, `${transcript.id}${ext}`);
+      fs.copyFileSync(fileToUpload, savedAudioPath);
+      this.logger.log(`Saved a copy of audio file for playback at: ${savedAudioPath}`);
+    } catch (err) {
+      this.logger.error('Failed to save a copy of the audio file for playback', err);
+    }
 
     // Clean up temporary compressed file immediately after upload to conserve local storage
     if (fileToUpload !== filePath && fs.existsSync(fileToUpload)) {
@@ -307,5 +322,18 @@ Output ONLY the raw JSON array. Do not include markdown fences like \`\`\`json o
         },
       ];
     }
+  }
+
+  getAudioFilePath(id: string): string | null {
+    const uploadsDir = path.join(process.cwd(), 'uploads');
+    if (!fs.existsSync(uploadsDir)) {
+      return null;
+    }
+    const files = fs.readdirSync(uploadsDir);
+    const matchedFile = files.find((file) => file.startsWith(id));
+    if (matchedFile) {
+      return path.join(uploadsDir, matchedFile);
+    }
+    return null;
   }
 }

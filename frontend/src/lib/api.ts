@@ -130,7 +130,7 @@ export const transcribeApi = {
     });
   },
 
-  getExportUrl(id: string, format: 'txt' | 'srt' | 'vtt'): string {
+  getExportUrl(id: string, format: 'txt' | 'srt' | 'vtt' | 'pdf' | 'docx' | 'xlsx'): string {
     return `${BACKEND_URL}/transcribe/export/${id}?format=${format}`;
   },
 };

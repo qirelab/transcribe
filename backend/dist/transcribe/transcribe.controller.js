@@ -44,6 +44,9 @@ var __metadata = (this && this.__metadata) || function (k, v) {
 var __param = (this && this.__param) || function (paramIndex, decorator) {
     return function (target, key) { decorator(target, key, paramIndex); }
 };
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 var TranscribeController_1;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.TranscribeController = void 0;
@@ -52,6 +55,21 @@ const platform_express_1 = require("@nestjs/platform-express");
 const transcribe_service_1 = require("./transcribe.service");
 const database_service_1 = require("../database/database.service");
 const fs = __importStar(require("fs"));
+const ExcelJS = __importStar(require("exceljs"));
+const docx_1 = require("docx");
+const pdfkit_1 = __importDefault(require("pdfkit"));
+function formatSimpleTimestamp(ms) {
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const mm = String(minutes % 60).padStart(2, '0');
+    const ss = String(seconds % 60).padStart(2, '0');
+    if (hours > 0) {
+        const hh = String(hours).padStart(2, '0');
+        return `${hh}:${mm}:${ss}`;
+    }
+    return `${mm}:${ss}`;
+}
 function formatTimestamp(ms, isSrt) {
     const seconds = Math.floor(ms / 1000);
     const milliseconds = ms % 1000;
@@ -119,7 +137,24 @@ let TranscribeController = TranscribeController_1 = class TranscribeController {
     }
     deleteRecord(id) {
         this.dbService.deleteTranscript(id);
+        try {
+            const filePath = this.transcribeService.getAudioFilePath(id);
+            if (filePath && fs.existsSync(filePath)) {
+                fs.unlinkSync(filePath);
+                this.logger.log(`Deleted corresponding audio file: ${filePath}`);
+            }
+        }
+        catch (err) {
+            this.logger.error(`Failed to delete corresponding audio file for transcript ${id}:`, err);
+        }
         return { success: true };
+    }
+    async getAudio(id, res) {
+        const filePath = this.transcribeService.getAudioFilePath(id);
+        if (!filePath || !fs.existsSync(filePath)) {
+            throw new common_1.NotFoundException('Audio file not found.');
+        }
+        return res.sendFile(filePath);
     }
     renameSpeaker(body) {
         const { id, speaker, name } = body;
@@ -136,7 +171,7 @@ let TranscribeController = TranscribeController_1 = class TranscribeController {
         this.dbService.saveTranscript(record);
         return record;
     }
-    exportTranscript(id, format, res) {
+    async exportTranscript(id, format, res) {
         const record = this.dbService.getTranscript(id);
         if (!record) {
             throw new common_1.NotFoundException('Transcript not found');
@@ -180,8 +215,183 @@ let TranscribeController = TranscribeController_1 = class TranscribeController {
             res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}.txt"`);
             return res.send(content);
         }
+        else if (selectedFormat === 'xlsx') {
+            const workbook = new ExcelJS.Workbook();
+            const worksheet = workbook.addWorksheet('Transcript');
+            worksheet.columns = [
+                { header: 'Start Time', key: 'start', width: 12 },
+                { header: 'End Time', key: 'end', width: 12 },
+                { header: 'Speaker', key: 'speaker', width: 18 },
+                { header: 'Dialogue / Utterance', key: 'text', width: 65 },
+            ];
+            const headerRow = worksheet.getRow(1);
+            headerRow.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FFFFFF' } };
+            headerRow.fill = {
+                type: 'pattern',
+                pattern: 'solid',
+                fgColor: { argb: '6366F1' },
+            };
+            headerRow.alignment = { vertical: 'middle', horizontal: 'left' };
+            headerRow.height = 24;
+            const utterances = record.utterances || [];
+            utterances.forEach((u, idx) => {
+                const row = worksheet.addRow({
+                    start: formatSimpleTimestamp(u.start),
+                    end: formatSimpleTimestamp(u.end),
+                    speaker: getSpeakerName(u.speaker),
+                    text: u.text,
+                });
+                if (idx % 2 === 1) {
+                    row.fill = {
+                        type: 'pattern',
+                        pattern: 'solid',
+                        fgColor: { argb: 'F8FAFC' },
+                    };
+                }
+                row.alignment = { vertical: 'middle', wrapText: true };
+                row.font = { name: 'Arial', size: 10 };
+            });
+            worksheet.eachRow({ includeEmpty: false }, (row) => {
+                row.eachCell((cell) => {
+                    cell.border = {
+                        top: { style: 'thin', color: { argb: 'E2E8F0' } },
+                        left: { style: 'thin', color: { argb: 'E2E8F0' } },
+                        bottom: { style: 'thin', color: { argb: 'E2E8F0' } },
+                        right: { style: 'thin', color: { argb: 'E2E8F0' } },
+                    };
+                });
+            });
+            res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+            res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}.xlsx"`);
+            await workbook.xlsx.write(res);
+            return res.end();
+        }
+        else if (selectedFormat === 'docx') {
+            const utterances = record.utterances || [];
+            const tableRows = [
+                new docx_1.TableRow({
+                    tableHeader: true,
+                    children: [
+                        new docx_1.TableCell({
+                            width: { size: 15, type: docx_1.WidthType.PERCENTAGE },
+                            shading: { fill: '6366F1' },
+                            children: [new docx_1.Paragraph({ children: [new docx_1.TextRun({ text: 'Time', bold: true, color: 'FFFFFF' })] })],
+                        }),
+                        new docx_1.TableCell({
+                            width: { size: 20, type: docx_1.WidthType.PERCENTAGE },
+                            shading: { fill: '6366F1' },
+                            children: [new docx_1.Paragraph({ children: [new docx_1.TextRun({ text: 'Speaker', bold: true, color: 'FFFFFF' })] })],
+                        }),
+                        new docx_1.TableCell({
+                            width: { size: 65, type: docx_1.WidthType.PERCENTAGE },
+                            shading: { fill: '6366F1' },
+                            children: [new docx_1.Paragraph({ children: [new docx_1.TextRun({ text: 'Dialogue / Utterance', bold: true, color: 'FFFFFF' })] })],
+                        }),
+                    ],
+                }),
+            ];
+            utterances.forEach((u, idx) => {
+                tableRows.push(new docx_1.TableRow({
+                    children: [
+                        new docx_1.TableCell({
+                            width: { size: 15, type: docx_1.WidthType.PERCENTAGE },
+                            shading: idx % 2 === 1 ? { fill: 'F8FAFC' } : undefined,
+                            children: [new docx_1.Paragraph({ children: [new docx_1.TextRun({ text: formatSimpleTimestamp(u.start) })] })],
+                        }),
+                        new docx_1.TableCell({
+                            width: { size: 20, type: docx_1.WidthType.PERCENTAGE },
+                            shading: idx % 2 === 1 ? { fill: 'F8FAFC' } : undefined,
+                            children: [new docx_1.Paragraph({ children: [new docx_1.TextRun({ text: getSpeakerName(u.speaker), bold: true })] })],
+                        }),
+                        new docx_1.TableCell({
+                            width: { size: 65, type: docx_1.WidthType.PERCENTAGE },
+                            shading: idx % 2 === 1 ? { fill: 'F8FAFC' } : undefined,
+                            children: [new docx_1.Paragraph({ children: [new docx_1.TextRun({ text: u.text })] })],
+                        }),
+                    ],
+                }));
+            });
+            const doc = new docx_1.Document({
+                sections: [
+                    {
+                        properties: {},
+                        children: [
+                            new docx_1.Paragraph({
+                                text: record.title,
+                                heading: docx_1.HeadingLevel.HEADING_1,
+                                spacing: { after: 200 },
+                            }),
+                            new docx_1.Paragraph({
+                                children: [
+                                    new docx_1.TextRun({ text: `Date: ${new Date(record.createdAt).toLocaleDateString()}`, italics: true }),
+                                ],
+                                spacing: { after: 300 },
+                            }),
+                            new docx_1.Table({
+                                width: { size: 100, type: docx_1.WidthType.PERCENTAGE },
+                                borders: {
+                                    top: { style: docx_1.BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
+                                    bottom: { style: docx_1.BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
+                                    left: { style: docx_1.BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
+                                    right: { style: docx_1.BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
+                                    insideHorizontal: { style: docx_1.BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
+                                    insideVertical: { style: docx_1.BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
+                                },
+                                rows: tableRows,
+                            }),
+                        ],
+                    },
+                ],
+            });
+            const buffer = await docx_1.Packer.toBuffer(doc);
+            res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+            res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}.docx"`);
+            return res.send(buffer);
+        }
+        else if (selectedFormat === 'pdf') {
+            const doc = new pdfkit_1.default({ margin: 40, size: 'A4' });
+            const regularFontPath = '/System/Library/Fonts/Supplemental/Arial.ttf';
+            const boldFontPath = '/System/Library/Fonts/Supplemental/Arial Bold.ttf';
+            if (fs.existsSync(regularFontPath)) {
+                doc.registerFont('ArialRegular', regularFontPath);
+                doc.font('ArialRegular');
+            }
+            else {
+                doc.font('Helvetica');
+            }
+            if (fs.existsSync(boldFontPath)) {
+                doc.registerFont('ArialBold', boldFontPath);
+            }
+            if (fs.existsSync(boldFontPath))
+                doc.font('ArialBold');
+            doc.fontSize(20).fillColor('#1E1B4B').text(record.title, { ellipsis: true });
+            if (fs.existsSync(regularFontPath))
+                doc.font('ArialRegular');
+            doc.fontSize(10).fillColor('#64748B').text(`Date: ${new Date(record.createdAt).toLocaleDateString()}`);
+            doc.moveDown(1.5);
+            doc.strokeColor('#E2E8F0').lineWidth(1).moveTo(40, doc.y).lineTo(555, doc.y).stroke();
+            doc.moveDown(1.5);
+            const utterances = record.utterances || [];
+            utterances.forEach((u) => {
+                doc.save();
+                const timeStr = `[${formatSimpleTimestamp(u.start)}]`;
+                if (fs.existsSync(boldFontPath))
+                    doc.font('ArialBold');
+                doc.fontSize(10).fillColor('#7C3AED').text(timeStr, { continued: true });
+                doc.fillColor('#0F172A').text(` ${getSpeakerName(u.speaker)}:`, { continued: true });
+                if (fs.existsSync(regularFontPath))
+                    doc.font('ArialRegular');
+                doc.fillColor('#334155').text(` ${u.text}`);
+                doc.restore();
+                doc.moveDown(0.8);
+            });
+            res.setHeader('Content-Type', 'application/pdf');
+            res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}.pdf"`);
+            doc.pipe(res);
+            doc.end();
+        }
         else {
-            throw new common_1.BadRequestException('Unsupported export format. Use srt, vtt, or txt.');
+            throw new common_1.BadRequestException('Unsupported export format. Use srt, vtt, txt, xlsx, docx, or pdf.');
         }
     }
 };
@@ -218,6 +428,14 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], TranscribeController.prototype, "deleteRecord", null);
 __decorate([
+    (0, common_1.Get)('audio/:id'),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.Res)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object]),
+    __metadata("design:returntype", Promise)
+], TranscribeController.prototype, "getAudio", null);
+__decorate([
     (0, common_1.Post)('rename-speaker'),
     __param(0, (0, common_1.Body)()),
     __metadata("design:type", Function),
@@ -231,7 +449,7 @@ __decorate([
     __param(2, (0, common_1.Res)()),
     __metadata("design:type", Function),
     __metadata("design:paramtypes", [String, String, Object]),
-    __metadata("design:returntype", void 0)
+    __metadata("design:returntype", Promise)
 ], TranscribeController.prototype, "exportTranscript", null);
 exports.TranscribeController = TranscribeController = TranscribeController_1 = __decorate([
     (0, common_1.Controller)('transcribe'),

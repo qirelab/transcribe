@@ -13,6 +13,7 @@ import {
   Chip,
   InputAdornment,
   Paper,
+  Button,
 } from '@mui/material';
 import SearchIcon from '@mui/icons-material/Search';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -20,6 +21,7 @@ import AudioFileIcon from '@mui/icons-material/AudioFile';
 import HistoryIcon from '@mui/icons-material/History';
 import ErrorIcon from '@mui/icons-material/Error';
 import AutorenewIcon from '@mui/icons-material/Autorenew';
+import CloudUploadIcon from '@mui/icons-material/CloudUpload';
 import { TranscriptRecord } from '@/lib/api';
 
 const SidebarContainer = styled(Paper)`
@@ -37,7 +39,32 @@ const SidebarContainer = styled(Paper)`
 
 const HeaderBox = styled(Box)`
   padding: 24px;
+`;
+
+const UploadButtonBox = styled(Box)`
+  padding: 0 24px 16px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+`;
+
+const GradientButton = styled(Button)`
+  background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%) !important;
+  color: white !important;
+  font-weight: 700 !important;
+  text-transform: none !important;
+  border-radius: 10px !important;
+  padding: 10px 16px !important;
+  box-shadow: 0 4px 14px rgba(124, 58, 237, 0.3) !important;
+  transition: all 0.2s ease !important;
+
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(124, 58, 237, 0.4) !important;
+    background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%) !important;
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
 `;
 
 const SearchBox = styled(Box)`
@@ -53,7 +80,7 @@ const ListContainer = styled(Box)`
 interface HistorySidebarProps {
   history: TranscriptRecord[];
   selectedId: string | null;
-  onSelect: (id: string) => void;
+  onSelect: (id: string | null) => void;
   onDelete: (id: string, e: React.MouseEvent) => void;
 }
 
@@ -146,6 +173,17 @@ export default function HistorySidebar({
           Explore previous recordings & meetings
         </Typography>
       </HeaderBox>
+
+      <UploadButtonBox>
+        <GradientButton
+          fullWidth
+          variant="contained"
+          startIcon={<CloudUploadIcon />}
+          onClick={() => onSelect(null)}
+        >
+          Transcribe New File
+        </GradientButton>
+      </UploadButtonBox>
 
       <SearchBox>
         <TextField

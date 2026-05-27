@@ -9,6 +9,7 @@ import VolumeUpIcon from '@mui/icons-material/VolumeUp';
 import VolumeMuteIcon from '@mui/icons-material/VolumeMute';
 import Replay10Icon from '@mui/icons-material/Replay10';
 import Forward10Icon from '@mui/icons-material/Forward10';
+import { transcribeApi } from '../lib/api';
 
 const PlayerContainer = styled(Paper)`
   position: fixed;
@@ -50,12 +51,14 @@ const VolumeSection = styled(Box)`
 `;
 
 interface CustomAudioPlayerProps {
+  recordId?: string;
   duration: number; // in seconds
   seekTrigger: number | null; // seek request in ms
   onTimeUpdate: (ms: number) => void; // reports playback time in ms
 }
 
 export default function CustomAudioPlayer({
+  recordId,
   duration,
   seekTrigger,
   onTimeUpdate,
@@ -65,6 +68,7 @@ export default function CustomAudioPlayer({
   const [currentTime, setCurrentTime] = useState(0); // in seconds
   const [volume, setVolume] = useState(0.8);
   const [isMuted, setIsMuted] = useState(false);
+  const [audioError, setAudioError] = useState(false);
 
   // Store callbacks/state in refs to prevent dependency changes from re-triggering effects
   const onTimeUpdateRef = useRef(onTimeUpdate);
@@ -77,63 +81,107 @@ export default function CustomAudioPlayer({
     isPlayingRef.current = isPlaying;
   }, [isPlaying]);
 
+  const src = recordId ? `${transcribeApi.getBackendUrl()}/transcribe/audio/${recordId}` : '';
+
+  // Reset audio and player states whenever the selected record changes
+  useEffect(() => {
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setAudioError(false);
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
+  }, [recordId]);
+
+  const isFirstRender = useRef(true);
+
+  // Sync current time changes to parent and handle end of playback cleanly via a reactive effect
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    
+    onTimeUpdateRef.current(currentTime * 1000);
+    
+    if (currentTime >= duration && isPlaying) {
+      setIsPlaying(false);
+    }
+  }, [currentTime, duration, isPlaying]);
+
   // Sync seek triggers from clicking words/chapters
   useEffect(() => {
-    if (seekTrigger !== null && audioRef.current) {
+    if (seekTrigger !== null) {
       const seekSec = seekTrigger / 1000;
-      audioRef.current.currentTime = seekSec;
+      if (audioRef.current && src && !audioError) {
+        audioRef.current.currentTime = seekSec;
+      }
       setCurrentTime(seekSec);
-      onTimeUpdateRef.current(seekTrigger);
       
       // Auto play on seek to feel snappy
       if (!isPlayingRef.current) {
-        audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+        if (audioRef.current && src && !audioError) {
+          audioRef.current.play().then(() => setIsPlaying(true)).catch((err) => {
+            console.warn('Audio play on seek failed:', err);
+            setAudioError(true);
+            setIsPlaying(true);
+          });
+        } else {
+          setIsPlaying(true);
+        }
       }
     }
-  }, [seekTrigger]);
+  }, [seekTrigger, src, audioError]);
 
   // Sync volume state
   useEffect(() => {
-    if (audioRef.current) {
+    if (audioRef.current && src && !audioError) {
       audioRef.current.volume = isMuted ? 0 : volume;
     }
-  }, [volume, isMuted]);
+  }, [volume, isMuted, src, audioError]);
 
   // Handle play/pause
   const togglePlay = React.useCallback(() => {
     if (!audioRef.current) return;
+    if (!src || audioError) {
+      setIsPlaying((prev) => !prev);
+      return;
+    }
     if (isPlaying) {
       audioRef.current.pause();
       setIsPlaying(false);
     } else {
-      audioRef.current.play().then(() => setIsPlaying(true)).catch(() => {});
+      audioRef.current.play().then(() => setIsPlaying(true)).catch((err) => {
+        console.warn('Playback failed, falling back to mock simulation:', err);
+        setAudioError(true);
+        setIsPlaying(true);
+      });
     }
-  }, [isPlaying]);
+  }, [isPlaying, src, audioError]);
 
   const skipTime = (secs: number) => {
-    if (!audioRef.current) return;
-    let target = audioRef.current.currentTime + secs;
+    let target = currentTime + secs;
     if (target < 0) target = 0;
     if (target > duration) target = duration;
-    audioRef.current.currentTime = target;
+    if (audioRef.current && src && !audioError) {
+      audioRef.current.currentTime = target;
+    }
     setCurrentTime(target);
-    onTimeUpdateRef.current(target * 1000);
   };
 
   const handleProgressChange = (_: unknown, value: number | number[]) => {
     const val = value as number;
-    if (audioRef.current) {
+    if (audioRef.current && src && !audioError) {
       audioRef.current.currentTime = val;
     }
     setCurrentTime(val);
-    onTimeUpdateRef.current(val * 1000);
   };
 
   const handleAudioTimeUpdate = () => {
     if (audioRef.current) {
       const sec = audioRef.current.currentTime;
       setCurrentTime(sec);
-      onTimeUpdateRef.current(sec * 1000);
     }
   };
 
@@ -147,25 +195,22 @@ export default function CustomAudioPlayer({
     return `${m}:${String(s).padStart(2, '0')}`;
   };
 
-  // Generate a mock synthesized audio voice stream if there is no physical audio path
+  // Generate a mock synthesized audio voice stream ONLY if there is no physical audio path loaded or if it failed
   useEffect(() => {
     let timer: NodeJS.Timeout;
-    if (isPlaying) {
+    if (isPlaying && (!src || audioError)) {
       timer = setInterval(() => {
         setCurrentTime((prev) => {
-          if (prev >= duration) {
-            setIsPlaying(false);
-            clearInterval(timer);
+          const next = prev + 0.25; // tick every 250ms
+          if (next >= duration) {
             return duration;
           }
-          const next = prev + 0.25; // tick every 250ms
-          onTimeUpdateRef.current(next * 1000);
           return next;
         });
       }, 250);
     }
     return () => clearInterval(timer);
-  }, [isPlaying, duration]);
+  }, [isPlaying, duration, src, audioError]);
 
   // Hook global keyboard shortcuts
   useEffect(() => {
@@ -182,11 +227,16 @@ export default function CustomAudioPlayer({
 
   return (
     <PlayerContainer elevation={4}>
-      {/* Invisible HTML5 Audio Tag (in case user mounts actual URL in the future) */}
+      {/* Invisible HTML5 Audio Tag */}
       <audio
         ref={audioRef}
+        src={src}
         onTimeUpdate={handleAudioTimeUpdate}
         onEnded={handleAudioEnded}
+        onError={(e) => {
+          console.warn('HTML5 Audio loading error, fallback to silent simulation', e);
+          setAudioError(true);
+        }}
         style={{ display: 'none' }}
       />
 

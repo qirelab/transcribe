@@ -25,6 +25,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import EditIcon from '@mui/icons-material/Edit';
 import LibraryBooksIcon from '@mui/icons-material/LibraryBooks';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
+import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import { TranscriptRecord, transcribeApi } from '@/lib/api';
 
 const MainLayout = styled(Box)`
@@ -121,6 +122,7 @@ interface TranscriptWorkspaceProps {
   record: TranscriptRecord;
   currentTimeMs: number;
   onSeek: (ms: number) => void;
+  onBack: () => void;
   onUpdateRecord: (updated: TranscriptRecord) => void;
 }
 
@@ -128,6 +130,7 @@ export default function TranscriptWorkspace({
   record,
   currentTimeMs,
   onSeek,
+  onBack,
   onUpdateRecord,
 }: TranscriptWorkspaceProps) {
   const [search, setSearch] = useState('');
@@ -146,7 +149,7 @@ export default function TranscriptWorkspace({
     setDownloadAnchor(null);
   };
 
-  const handleExport = (format: 'txt' | 'srt' | 'vtt') => {
+  const handleExport = (format: 'txt' | 'srt' | 'vtt' | 'pdf' | 'docx' | 'xlsx') => {
     handleDownloadClose();
     const url = transcribeApi.getExportUrl(record.id, format);
     window.open(url, '_blank');
@@ -198,14 +201,34 @@ export default function TranscriptWorkspace({
     <Box sx={{ display: 'flex', flexDirection: 'column', flexGrow: 1, height: '100%' }}>
       {/* Top Action Header */}
       <TopActionBar>
-        <Box>
-          <Typography variant="h5" sx={{ fontWeight: 800 }}>
-            {record.title}
-          </Typography>
-          <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-            {record.wordsCount ? `${record.wordsCount.toLocaleString()} words` : '0 words'} •{' '}
-            {record.utterances?.length || 0} segments
-          </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <IconButton
+            onClick={onBack}
+            sx={{
+              color: 'text.secondary',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              borderRadius: '8px',
+              padding: '8px',
+              transition: 'all 0.2s ease',
+              '&:hover': {
+                color: '#7c3aed',
+                borderColor: 'rgba(124, 58, 237, 0.3)',
+                background: 'rgba(124, 58, 237, 0.05)',
+              },
+            }}
+            title="Back to Upload"
+          >
+            <ArrowBackIcon sx={{ fontSize: 20 }} />
+          </IconButton>
+          <Box>
+            <Typography variant="h5" sx={{ fontWeight: 800 }}>
+              {record.title}
+            </Typography>
+            <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+              {record.wordsCount ? `${record.wordsCount.toLocaleString()} words` : '0 words'} •{' '}
+              {record.utterances?.length || 0} segments
+            </Typography>
+          </Box>
         </Box>
 
         <Box sx={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
@@ -259,6 +282,9 @@ export default function TranscriptWorkspace({
             <MenuItem onClick={() => handleExport('txt')}>Plain Text (.txt)</MenuItem>
             <MenuItem onClick={() => handleExport('srt')}>Subtitles (.srt)</MenuItem>
             <MenuItem onClick={() => handleExport('vtt')}>WebVTT (.vtt)</MenuItem>
+            <MenuItem onClick={() => handleExport('pdf')}>PDF Document (.pdf)</MenuItem>
+            <MenuItem onClick={() => handleExport('docx')}>Word Document (.docx)</MenuItem>
+            <MenuItem onClick={() => handleExport('xlsx')}>Excel Spreadsheet (.xlsx)</MenuItem>
           </Menu>
         </Box>
       </TopActionBar>
