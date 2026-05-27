@@ -158,14 +158,15 @@ export class TranscribeService implements OnModuleDestroy {
 
     // Save a copy of the audio file in uploads for playback stream
     try {
-      const ext = path.extname(fileToUpload) || '.mp3';
+      const isCompressed = fileToUpload !== filePath;
+      const ext = isCompressed ? '.mp3' : (path.extname(fileName) || '.mp3');
       const uploadsDir = path.join(process.cwd(), 'uploads');
       if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true });
       }
       const savedAudioPath = path.join(uploadsDir, `${transcript.id}${ext}`);
       fs.copyFileSync(fileToUpload, savedAudioPath);
-      this.logger.log(`Saved a copy of audio file for playback at: ${savedAudioPath}`);
+      this.logger.log(`Saved a copy of audio file for playback at: ${savedAudioPath} (isCompressed: ${isCompressed})`);
     } catch (err) {
       this.logger.error('Failed to save a copy of the audio file for playback', err);
     }
