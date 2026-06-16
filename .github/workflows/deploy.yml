@@ -1,0 +1,216 @@
+name: Deploy transcribe to VPS
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies (root + backend + frontend)
+        run: npm run install-all
+
+      - name: Security audit
+        run: npm audit --audit-level=critical
+        continue-on-error: false
+
+      - name: Create frontend .env file
+        run: |
+          echo "Creating frontend/.env from secrets..."
+          cat > frontend/.env << 'EOF'
+          ${{ secrets.ENV_FILE_FRONTEND }}
+          EOF
+          echo "frontend/.env created. Size and lines:"
+          wc frontend/.env
+          echo "First 3 lines:"
+          head -n 3 frontend/.env
+
+      - name: Create backend .env file
+        run: |
+          echo "Creating backend/.env from secrets..."
+          cat > backend/.env << 'EOF'
+          ${{ secrets.ENV_FILE_BACKEND }}
+          EOF
+          echo "backend/.env created. Size and lines:"
+          wc backend/.env
+          echo "First 3 lines:"
+          head -n 3 backend/.env
+
+      - name: Build backend (NestJS)
+        working-directory: ./backend
+        # nest build is pure TypeScript compilation — no env needed
+        run: npm run build
+
+      - name: Build frontend (Next.js)
+        working-directory: ./frontend
+        # Next.js auto-loads frontend/.env at build time (bakes NEXT_PUBLIC_* into bundle)
+        run: npm run build
+
+      - name: Verify build artifacts
+        run: |
+          test -f backend/dist/main.js \
+            && echo "✓ backend/dist/main.js EXISTS" \
+            || { echo "✗ backend/dist/main.js MISSING"; exit 1; }
+          test -d frontend/.next \
+            && echo "✓ frontend/.next EXISTS" \
+            || { echo "✗ frontend/.next MISSING"; exit 1; }
+
+      - name: Prepare deployment archive
+        run: |
+          echo "Creating deployment directory..."
+          mkdir -p deploy
+
+          if [ ! -s frontend/.env ] || [ ! -s backend/.env ]; then
+            echo "ERROR: one of .env files is empty! Check ENV_FILE_FRONTEND / ENV_FILE_BACKEND secrets."
+            exit 1
+          fi
+
+          echo "Creating archive..."
+          tar -czf deploy/transcribe.tar.gz \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='deploy' \
+            --exclude='node_modules' \
+            --exclude='**/node_modules' \
+            --exclude='npm-cache' \
+            --exclude='frontend/.next/cache' \
+            --exclude='backend/data' \
+            --exclude='backend/uploads' \
+            --exclude='**/cypress/screenshots' \
+            --exclude='**/cypress/videos' \
+            .
+
+          echo "Archive created:"
+          ls -lh deploy/
+          echo "Verifying .env files in archive:"
+          tar -tzf deploy/transcribe.tar.gz | grep -E "(frontend|backend)/\.env$" || echo ".env files NOT in archive!"
+
+      - name: Copy archive to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          source: "deploy/transcribe.tar.gz"
+          target: "/tmp/"
+          strip_components: 1
+
+      - name: Deploy on VPS
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            set -e
+
+            echo "Starting deployment..."
+
+            DEPLOY_DIR="/var/www/transcribe"
+            PM2_FE="transcribe-frontend"
+            PM2_BE="transcribe-backend"
+            ARCHIVE_NAME="transcribe.tar.gz"
+            FE_PORT=6102
+            BE_PORT=6103
+
+            echo "Deploy directory: $DEPLOY_DIR"
+            echo "Frontend: $PM2_FE on port $FE_PORT"
+            echo "Backend:  $PM2_BE on port $BE_PORT"
+
+            # Preserve uploaded files and JSON DB across deploys
+            mkdir -p /tmp/transcribe-backup
+            if [ -d "$DEPLOY_DIR/backend/uploads" ]; then
+              echo "Backing up backend/uploads..."
+              cp -r "$DEPLOY_DIR/backend/uploads" /tmp/transcribe-backup/uploads
+            fi
+            if [ -d "$DEPLOY_DIR/backend/data" ]; then
+              echo "Backing up backend/data (db.json, config.json)..."
+              cp -r "$DEPLOY_DIR/backend/data" /tmp/transcribe-backup/data
+            fi
+
+            # Clean old deployment
+            echo "Cleaning old deployment..."
+            rm -rf "$DEPLOY_DIR"
+            mkdir -p "$DEPLOY_DIR"
+
+            # Extract archive
+            echo "Extracting archive..."
+            tar -xzf /tmp/$ARCHIVE_NAME -C "$DEPLOY_DIR/"
+            rm -f /tmp/$ARCHIVE_NAME
+
+            # Restore preserved data
+            mkdir -p "$DEPLOY_DIR/backend"
+            if [ -d /tmp/transcribe-backup/uploads ]; then
+              echo "Restoring uploads..."
+              mv /tmp/transcribe-backup/uploads "$DEPLOY_DIR/backend/uploads"
+            else
+              mkdir -p "$DEPLOY_DIR/backend/uploads"
+            fi
+            if [ -d /tmp/transcribe-backup/data ]; then
+              echo "Restoring data (db.json, config.json)..."
+              mv /tmp/transcribe-backup/data "$DEPLOY_DIR/backend/data"
+            else
+              mkdir -p "$DEPLOY_DIR/backend/data"
+            fi
+            rm -rf /tmp/transcribe-backup
+
+            # Install dependencies on server (root + backend + frontend)
+            # Memory-friendly flags: skip audit/fund to reduce RAM pressure
+            echo "Installing dependencies on VPS..."
+            cd "$DEPLOY_DIR"
+            NODE_OPTIONS="--max-old-space-size=1024" npm install \
+              --no-audit \
+              --no-fund \
+              --prefer-offline
+            NODE_OPTIONS="--max-old-space-size=1024" npm install --prefix backend \
+              --no-audit \
+              --no-fund \
+              --prefer-offline
+            NODE_OPTIONS="--max-old-space-size=1024" npm install --prefix frontend \
+              --no-audit \
+              --no-fund \
+              --prefer-offline
+
+            # Backend PM2 (NestJS reads process.env directly — load .env into env)
+            echo "Restarting backend..."
+            cd "$DEPLOY_DIR/backend"
+            set -a
+            source .env
+            set +a
+            if pm2 describe $PM2_BE > /dev/null 2>&1; then
+              pm2 delete $PM2_BE
+            fi
+            PORT=$BE_PORT pm2 start dist/main.js --name $PM2_BE --update-env
+            pm2 show $PM2_BE
+
+            # Frontend PM2 (Next.js auto-loads .env from cwd)
+            echo "Restarting frontend..."
+            cd "$DEPLOY_DIR/frontend"
+            if pm2 describe $PM2_FE > /dev/null 2>&1; then
+              pm2 delete $PM2_FE
+            fi
+            NEXT_BIN="$DEPLOY_DIR/frontend/node_modules/.bin/next"
+            echo "Using next binary: $NEXT_BIN"
+            pm2 start "$NEXT_BIN" --name $PM2_FE --update-env --cwd "$DEPLOY_DIR/frontend" -- start -p $FE_PORT
+            pm2 show $PM2_FE
+
+            # PM2 persistence
+            pm2 startup || true
+            pm2 save
+            pm2 list
+
+            echo "Deployment completed successfully!"

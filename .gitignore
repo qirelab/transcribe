@@ -29,6 +29,10 @@ yarn-error.log*
 .env*.local
 .env
 
+# runtime data (api key, transcript history, uploads)
+/backend/data/
+/backend/uploads/
+
 # vercel
 .vercel
 
