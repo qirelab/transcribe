@@ -85,6 +85,8 @@ export default function CustomAudioPlayer({
 
   // Reset audio and player states whenever the selected record changes
   useEffect(() => {
+    // The media element and its mirrored UI state must reset together.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsPlaying(false);
     setCurrentTime(0);
     setAudioError(false);
@@ -106,6 +108,7 @@ export default function CustomAudioPlayer({
     onTimeUpdateRef.current(currentTime * 1000);
     
     if (currentTime >= duration && isPlaying) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsPlaying(false);
     }
   }, [currentTime, duration, isPlaying]);
@@ -117,6 +120,8 @@ export default function CustomAudioPlayer({
       if (audioRef.current && src && !audioError) {
         audioRef.current.currentTime = seekSec;
       }
+      // External seek requests intentionally synchronize local player state.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCurrentTime(seekSec);
       
       // Auto play on seek to feel snappy
@@ -231,6 +236,7 @@ export default function CustomAudioPlayer({
       <audio
         ref={audioRef}
         src={src}
+        crossOrigin="use-credentials"
         onTimeUpdate={handleAudioTimeUpdate}
         onEnded={handleAudioEnded}
         onError={(e) => {

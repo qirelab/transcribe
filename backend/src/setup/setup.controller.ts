@@ -4,9 +4,12 @@ import {
   Post,
   Body,
   BadRequestException,
+  UseGuards,
 } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
+@UseGuards(JwtAuthGuard)
 @Controller('setup')
 export class SetupController {
   constructor(private readonly dbService: DatabaseService) {}

@@ -51,39 +51,64 @@ Ensure you have **Node.js** (v18 or higher) and **npm** installed on your machin
    ```bash
    npm run install-all
    ```
-3. Start both the NestJS backend and Next.js frontend concurrently in development mode:
+3. Create local environment files and configure SMTP:
+   ```bash
+   cp backend/.env.example backend/.env
+   cp frontend/.env.example frontend/.env
+   ```
+   On Windows PowerShell, use `Copy-Item` instead of `cp`. Set a real SMTP server in `backend/.env`; registration sends an email verification link.
+4. Start both the NestJS backend and Next.js frontend concurrently in development mode:
    ```bash
    npm run dev
    ```
-4. Open your browser and navigate to:
+5. Open your browser and navigate to:
    * **Frontend Application:** [http://localhost:3000](http://localhost:3000)
    * **Backend REST API:** [http://localhost:3001](http://localhost:3001)
+
+### Environment and deployment
+
+Backend authentication variables:
+- `JWT_SECRET`: long random signing secret; mandatory when `NODE_ENV=production`.
+- `ALLOWED_EMAILS`: optional comma-separated list of exact additional addresses. Matching is case-insensitive.
+- `FRONTEND_URL`: public frontend URL used in verification links.
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`: SMTP transport settings.
+- `COOKIE_DOMAIN`: optional shared cookie domain; leave empty for host-only cookies.
+- `CORS_ORIGIN`: one or more comma-separated frontend origins.
+
+Frontend uses `NEXT_PUBLIC_BACKEND_URL`. Do not put secrets in any `NEXT_PUBLIC_*` variable.
+
+The deployment workflow reads complete environment files from GitHub secrets `ENV_FILE_BACKEND` and `ENV_FILE_FRONTEND`. Add the variables above to those secrets; their values are not printed by the workflow.
 
 ---
 
 ## 📖 How to Use the App
 
-### 🔑 1. Setup API Key
-Upon launching the application for the first time, you will be greeted by the **Setup Screen**. 
+### 👤 1. Register and verify your email
+- Addresses under `f-suite.com` and `qirelab.com` are allowed automatically.
+- Additional exact addresses can be added to the comma-separated backend variable `ALLOWED_EMAILS`.
+- Open the verification link sent by SMTP, then log in. Each account sees only its own transcripts and media.
+
+### 🔑 2. Setup API Key
+After login, if no shared AssemblyAI key is configured, you will be greeted by the **Setup Screen**.
 - Paste your **AssemblyAI API Key** (you can obtain one from the [AssemblyAI Dashboard](https://www.assemblyai.com/)).
 - Click **Save & Continue**. This configures the key on your local backend.
 
-### 📤 2. Upload Audio or Video
+### 📤 3. Upload Audio or Video
 - Drag and drop or browse any audio/video file (e.g., `.mp3`, `.wav`, `.m4a`, `.mp4`, `.avi`) into the glowing **Dashboard Upload Area**.
 - The app handles large files up to 2GB. 
 - While the background task processes the speakers, timestamps, and AI Lemur insights, you can watch the interactive progress shimmer.
 
-### 👥 3. Rename Speakers
+### 👥 4. Rename Speakers
 - Once transcription completes, click on any speaker's badge (e.g., `Speaker A`) in the workspace.
 - A popup prompt will appear. Enter their actual name (e.g., `Director`, `Alex`) and submit.
 - The name updates **instantly** throughout the entire dialogue, search list, and exported files!
 
-### 🎯 4. Interactive Navigation & Playback
+### 🎯 5. Interactive Navigation & Playback
 - Click the **Play** button on the floating audio player bar at the bottom.
 - Click **any individual word** or **chronological chapter** in the sidebar to jump exactly to that moment in the recording.
 - Use global keyboard shortcuts: Press **Spacebar** to toggle play/pause from anywhere on the page.
 
-### 💾 5. Export Your Dialogues
+### 💾 6. Export Your Dialogues
 - Click the **Export** dropdown button in the top right of the workspace.
 - Choose your preferred format:
   - **Word Document (.docx)** or **Excel Spreadsheet (.xlsx)** for perfectly structured, cell-separated conversation grids.

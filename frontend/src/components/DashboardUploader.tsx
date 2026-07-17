@@ -18,6 +18,36 @@ import AudioFileIcon from '@mui/icons-material/AudioFile';
 import VideoFileIcon from '@mui/icons-material/VideoFile';
 import { transcribeApi } from '@/lib/api';
 
+const SUPPORTED_AUDIO_EXTENSIONS = new Set([
+  'mp3',
+  'wav',
+  'm4a',
+  'aac',
+  'ogg',
+  'flac',
+  'webm',
+]);
+const SUPPORTED_VIDEO_EXTENSIONS = new Set([
+  'mp4',
+  'mov',
+  'mkv',
+  'avi',
+  'webm',
+  'm4v',
+]);
+
+function isSupportedMediaFile(file: File): boolean {
+  if (file.type.startsWith('audio/') || file.type.startsWith('video/')) {
+    return true;
+  }
+  // Some browsers/OS combinations provide empty or generic MIME types.
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
+  return (
+    SUPPORTED_AUDIO_EXTENSIONS.has(extension) ||
+    SUPPORTED_VIDEO_EXTENSIONS.has(extension)
+  );
+}
+
 const UploaderCard = styled(Paper)`
   width: 100%;
   max-width: 800px;
@@ -125,10 +155,7 @@ export default function DashboardUploader({ onTranscriptionStart }: DashboardUpl
   };
 
   const processFile = async (file: File) => {
-    const isAudio = file.type.startsWith('audio/');
-    const isVideo = file.type.startsWith('video/');
-
-    if (!isAudio && !isVideo) {
+    if (!isSupportedMediaFile(file)) {
       setError('Unsupported file type. Please upload a valid audio or video file.');
       return;
     }

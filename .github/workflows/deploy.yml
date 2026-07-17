@@ -34,8 +34,6 @@ jobs:
           EOF
           echo "frontend/.env created. Size and lines:"
           wc frontend/.env
-          echo "First 3 lines:"
-          head -n 3 frontend/.env
 
       - name: Create backend .env file
         run: |
@@ -45,8 +43,6 @@ jobs:
           EOF
           echo "backend/.env created. Size and lines:"
           wc backend/.env
-          echo "First 3 lines:"
-          head -n 3 backend/.env
 
       - name: Build backend (NestJS)
         working-directory: ./backend

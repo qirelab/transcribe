@@ -1,6 +1,18 @@
 const BACKEND_URL =
   process.env.NEXT_PUBLIC_BACKEND_URL ?? 'http://localhost:3001';
 
+export interface AuthUser {
+  id: string;
+  email: string;
+}
+
+async function apiFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  return fetch(`${BACKEND_URL}${path}`, {
+    ...init,
+    credentials: 'include',
+  });
+}
+
 export interface TranscriptRecord {
   id: string;
   title: string;
@@ -34,13 +46,13 @@ export const transcribeApi = {
   },
 
   async checkSetup(): Promise<{ hasApiKey: boolean }> {
-    const res = await fetch(`${BACKEND_URL}/setup/status`);
+    const res = await apiFetch('/setup/status');
     if (!res.ok) throw new Error('Failed to check backend setup status');
     return res.json();
   },
 
   async configureApiKey(apiKey: string): Promise<{ success: boolean }> {
-    const res = await fetch(`${BACKEND_URL}/setup/config`, {
+    const res = await apiFetch('/setup/config', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ apiKey }),
@@ -53,13 +65,13 @@ export const transcribeApi = {
   },
 
   async getHistory(): Promise<TranscriptRecord[]> {
-    const res = await fetch(`${BACKEND_URL}/transcribe/history`);
+    const res = await apiFetch('/transcribe/history');
     if (!res.ok) throw new Error('Failed to fetch transcription history');
     return res.json();
   },
 
   async deleteTranscript(id: string): Promise<{ success: boolean }> {
-    const res = await fetch(`${BACKEND_URL}/transcribe/history/${id}`, {
+    const res = await apiFetch(`/transcribe/history/${id}`, {
       method: 'DELETE',
     });
     if (!res.ok) throw new Error('Failed to delete transcript');
@@ -67,7 +79,7 @@ export const transcribeApi = {
   },
 
   async getTranscriptStatus(id: string): Promise<TranscriptRecord> {
-    const res = await fetch(`${BACKEND_URL}/transcribe/status/${id}`);
+    const res = await apiFetch(`/transcribe/status/${id}`);
     if (!res.ok) {
       const err = await res.json();
       throw new Error(err.message || 'Failed to fetch transcript status');
@@ -76,7 +88,7 @@ export const transcribeApi = {
   },
 
   async renameSpeaker(id: string, speaker: string, name: string): Promise<TranscriptRecord> {
-    const res = await fetch(`${BACKEND_URL}/transcribe/rename-speaker`, {
+    const res = await apiFetch('/transcribe/rename-speaker', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id, speaker, name }),
@@ -95,6 +107,7 @@ export const transcribeApi = {
       formData.append('file', file);
 
       xhr.open('POST', `${BACKEND_URL}/transcribe/upload`);
+      xhr.withCredentials = true;
 
       if (onProgress) {
         xhr.upload.onprogress = (event) => {
@@ -133,5 +146,69 @@ export const transcribeApi = {
 
   getExportUrl(id: string, format: 'txt' | 'srt' | 'vtt' | 'pdf' | 'docx' | 'xlsx'): string {
     return `${BACKEND_URL}/transcribe/export/${id}?format=${format}`;
+  },
+};
+
+async function readApiError(res: Response, fallback: string): Promise<Error> {
+  try {
+    const body = (await res.json()) as { message?: string | string[] };
+    const message = Array.isArray(body.message)
+      ? body.message.join(', ')
+      : body.message;
+    return new Error(message || fallback);
+  } catch {
+    return new Error(fallback);
+  }
+}
+
+export const authApi = {
+  async register(email: string, password: string): Promise<{ success: boolean; message: string }> {
+    const res = await apiFetch('/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) throw await readApiError(res, 'Registration failed');
+    return res.json();
+  },
+
+  async verifyEmail(token: string): Promise<{ success: boolean; user: AuthUser }> {
+    const res = await apiFetch('/auth/verify-email', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    if (!res.ok) throw await readApiError(res, 'Email verification failed');
+    return res.json();
+  },
+
+  async resendVerification(email: string): Promise<{ success: boolean; message: string }> {
+    const res = await apiFetch('/auth/resend-verification', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email }),
+    });
+    if (!res.ok) throw await readApiError(res, 'Could not resend verification email');
+    return res.json();
+  },
+
+  async login(email: string, password: string): Promise<{ user: AuthUser }> {
+    const res = await apiFetch('/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    if (!res.ok) throw await readApiError(res, 'Login failed');
+    return res.json();
+  },
+
+  async logout(): Promise<void> {
+    await apiFetch('/auth/logout', { method: 'POST' });
+  },
+
+  async me(): Promise<{ user: AuthUser }> {
+    const res = await apiFetch('/auth/me');
+    if (!res.ok) throw await readApiError(res, 'Not authenticated');
+    return res.json();
   },
 };

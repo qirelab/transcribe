@@ -121,7 +121,7 @@ let TranscribeService = TranscribeService_1 = class TranscribeService {
         const stats = fs.statSync(filePath);
         return (stats.size / (1024 * 1024)).toFixed(1);
     }
-    async startTranscription(filePath, fileName) {
+    async startTranscription(filePath, fileName, userId) {
         const client = this.getClient();
         let fileToUpload = filePath;
         try {
@@ -138,10 +138,11 @@ let TranscribeService = TranscribeService_1 = class TranscribeService {
         const transcript = await client.transcripts.submit({
             audio_url: uploadUrl,
             speaker_labels: true,
-            speech_models: ['universal-3-pro', 'universal-2'],
+            speech_models: ['universal-3-5-pro', 'universal-2'],
         });
         const record = {
             id: transcript.id,
+            userId,
             title: fileName,
             status: 'queued',
             createdAt: new Date().toISOString(),
@@ -151,7 +152,7 @@ let TranscribeService = TranscribeService_1 = class TranscribeService {
         this.logger.log(`Transcription job submitted with ID: ${transcript.id}`);
         try {
             const isCompressed = fileToUpload !== filePath;
-            const ext = isCompressed ? '.mp3' : (path.extname(fileName) || '.mp3');
+            const ext = isCompressed ? '.mp3' : path.extname(fileName) || '.mp3';
             const uploadsDir = path.join(process.cwd(), 'uploads');
             if (!fs.existsSync(uploadsDir)) {
                 fs.mkdirSync(uploadsDir, { recursive: true });
@@ -176,8 +177,8 @@ let TranscribeService = TranscribeService_1 = class TranscribeService {
         }
         return transcript.id;
     }
-    async checkStatusAndProcess(id) {
-        const record = this.dbService.getTranscript(id);
+    async checkStatusAndProcess(id, userId) {
+        const record = this.dbService.getTranscript(id, userId);
         if (!record) {
             throw new Error(`Transcript record with ID ${id} not found.`);
         }

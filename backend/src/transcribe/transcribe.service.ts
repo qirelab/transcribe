@@ -120,6 +120,7 @@ export class TranscribeService implements OnModuleDestroy {
   async startTranscription(
     filePath: string,
     fileName: string,
+    userId: string,
   ): Promise<string> {
     const client = this.getClient();
     let fileToUpload = filePath;
@@ -142,11 +143,12 @@ export class TranscribeService implements OnModuleDestroy {
     const transcript = await client.transcripts.submit({
       audio_url: uploadUrl,
       speaker_labels: true,
-      speech_models: ['universal-3-pro', 'universal-2'],
-    } as any);
+      speech_models: ['universal-3-5-pro', 'universal-2'],
+    });
 
     const record: TranscriptRecord = {
       id: transcript.id,
+      userId,
       title: fileName,
       status: 'queued',
       createdAt: new Date().toISOString(),
@@ -159,16 +161,21 @@ export class TranscribeService implements OnModuleDestroy {
     // Save a copy of the audio file in uploads for playback stream
     try {
       const isCompressed = fileToUpload !== filePath;
-      const ext = isCompressed ? '.mp3' : (path.extname(fileName) || '.mp3');
+      const ext = isCompressed ? '.mp3' : path.extname(fileName) || '.mp3';
       const uploadsDir = path.join(process.cwd(), 'uploads');
       if (!fs.existsSync(uploadsDir)) {
         fs.mkdirSync(uploadsDir, { recursive: true });
       }
       const savedAudioPath = path.join(uploadsDir, `${transcript.id}${ext}`);
       fs.copyFileSync(fileToUpload, savedAudioPath);
-      this.logger.log(`Saved a copy of audio file for playback at: ${savedAudioPath} (isCompressed: ${isCompressed})`);
+      this.logger.log(
+        `Saved a copy of audio file for playback at: ${savedAudioPath} (isCompressed: ${isCompressed})`,
+      );
     } catch (err) {
-      this.logger.error('Failed to save a copy of the audio file for playback', err);
+      this.logger.error(
+        'Failed to save a copy of the audio file for playback',
+        err,
+      );
     }
 
     // Clean up temporary compressed file immediately after upload to conserve local storage
@@ -188,8 +195,11 @@ export class TranscribeService implements OnModuleDestroy {
     return transcript.id;
   }
 
-  async checkStatusAndProcess(id: string): Promise<TranscriptRecord> {
-    const record = this.dbService.getTranscript(id);
+  async checkStatusAndProcess(
+    id: string,
+    userId: string,
+  ): Promise<TranscriptRecord> {
+    const record = this.dbService.getTranscript(id, userId);
     if (!record) {
       throw new Error(`Transcript record with ID ${id} not found.`);
     }
