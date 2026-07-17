@@ -15,6 +15,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SetupController = void 0;
 const common_1 = require("@nestjs/common");
 const database_service_1 = require("../database/database.service");
+const jwt_auth_guard_1 = require("../auth/jwt-auth.guard");
 let SetupController = class SetupController {
     dbService;
     constructor(dbService) {
@@ -47,6 +48,7 @@ __decorate([
     __metadata("design:returntype", void 0)
 ], SetupController.prototype, "configure", null);
 exports.SetupController = SetupController = __decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, common_1.Controller)('setup'),
     __metadata("design:paramtypes", [database_service_1.DatabaseService])
 ], SetupController);

@@ -58,6 +58,33 @@ const fs = __importStar(require("fs"));
 const ExcelJS = __importStar(require("exceljs"));
 const docx_1 = require("docx");
 const pdfkit_1 = __importDefault(require("pdfkit"));
+const jwt_auth_guard_1 = require("../auth/jwt-auth.guard");
+const current_user_decorator_1 = require("../auth/current-user.decorator");
+const SUPPORTED_AUDIO_EXTENSIONS = new Set([
+    '.mp3',
+    '.wav',
+    '.m4a',
+    '.aac',
+    '.ogg',
+    '.flac',
+    '.webm',
+]);
+const SUPPORTED_VIDEO_EXTENSIONS = new Set([
+    '.mp4',
+    '.mov',
+    '.mkv',
+    '.avi',
+    '.webm',
+    '.m4v',
+]);
+function isSupportedMedia(file) {
+    const mime = (file.mimetype || '').toLowerCase();
+    if (mime.startsWith('audio/') || mime.startsWith('video/'))
+        return true;
+    const extension = (file.originalname.match(/\.[^.]+$/)?.[0] || '').toLowerCase();
+    return (SUPPORTED_AUDIO_EXTENSIONS.has(extension) ||
+        SUPPORTED_VIDEO_EXTENSIONS.has(extension));
+}
 function formatSimpleTimestamp(ms) {
     const seconds = Math.floor(ms / 1000);
     const minutes = Math.floor(seconds / 60);
@@ -90,13 +117,16 @@ let TranscribeController = TranscribeController_1 = class TranscribeController {
         this.transcribeService = transcribeService;
         this.dbService = dbService;
     }
-    async uploadFile(file) {
+    async uploadFile(file, user) {
         if (!file) {
             throw new common_1.BadRequestException('No file uploaded or file exceeds the 2GB limit.');
         }
+        if (!isSupportedMedia(file)) {
+            throw new common_1.BadRequestException('Unsupported media format. Please upload an audio or video file.');
+        }
         try {
             this.logger.log(`Received file: ${file.originalname} (${(file.size / (1024 * 1024)).toFixed(1)}MB)`);
-            const id = await this.transcribeService.startTranscription(file.path, file.originalname);
+            const id = await this.transcribeService.startTranscription(file.path, file.originalname, user.id);
             if (fs.existsSync(file.path)) {
                 try {
                     fs.unlinkSync(file.path);
@@ -123,20 +153,22 @@ let TranscribeController = TranscribeController_1 = class TranscribeController {
             throw new common_1.BadRequestException(message);
         }
     }
-    getHistory() {
-        return this.dbService.getTranscripts();
+    getHistory(user) {
+        return this.dbService.getTranscripts(user.id);
     }
-    async getStatus(id) {
+    async getStatus(id, user) {
         try {
-            return await this.transcribeService.checkStatusAndProcess(id);
+            return await this.transcribeService.checkStatusAndProcess(id, user.id);
         }
         catch (e) {
             const message = e instanceof Error ? e.message : 'Transcript not found.';
             throw new common_1.NotFoundException(message);
         }
     }
-    deleteRecord(id) {
-        this.dbService.deleteTranscript(id);
+    deleteRecord(id, user) {
+        if (!this.dbService.deleteTranscript(id, user.id)) {
+            throw new common_1.NotFoundException('Transcript not found');
+        }
         try {
             const filePath = this.transcribeService.getAudioFilePath(id);
             if (filePath && fs.existsSync(filePath)) {
@@ -149,19 +181,22 @@ let TranscribeController = TranscribeController_1 = class TranscribeController {
         }
         return { success: true };
     }
-    async getAudio(id, res) {
+    getAudio(id, user, res) {
+        if (!this.dbService.getTranscript(id, user.id)) {
+            throw new common_1.NotFoundException('Audio file not found.');
+        }
         const filePath = this.transcribeService.getAudioFilePath(id);
         if (!filePath || !fs.existsSync(filePath)) {
             throw new common_1.NotFoundException('Audio file not found.');
         }
         return res.sendFile(filePath);
     }
-    renameSpeaker(body) {
+    renameSpeaker(body, user) {
         const { id, speaker, name } = body;
         if (!id || !speaker || name === undefined) {
             throw new common_1.BadRequestException('Missing required fields: id, speaker, name');
         }
-        const record = this.dbService.getTranscript(id);
+        const record = this.dbService.getTranscript(id, user.id);
         if (!record) {
             throw new common_1.NotFoundException('Transcript not found');
         }
@@ -171,8 +206,8 @@ let TranscribeController = TranscribeController_1 = class TranscribeController {
         this.dbService.saveTranscript(record);
         return record;
     }
-    async exportTranscript(id, format, res) {
-        const record = this.dbService.getTranscript(id);
+    async exportTranscript(id, format, user, res) {
+        const record = this.dbService.getTranscript(id, user.id);
         if (!record) {
             throw new common_1.NotFoundException('Transcript not found');
         }
@@ -225,7 +260,12 @@ let TranscribeController = TranscribeController_1 = class TranscribeController {
                 { header: 'Dialogue / Utterance', key: 'text', width: 65 },
             ];
             const headerRow = worksheet.getRow(1);
-            headerRow.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FFFFFF' } };
+            headerRow.font = {
+                name: 'Arial',
+                size: 11,
+                bold: true,
+                color: { argb: 'FFFFFF' },
+            };
             headerRow.fill = {
                 type: 'pattern',
                 pattern: 'solid',
@@ -275,17 +315,43 @@ let TranscribeController = TranscribeController_1 = class TranscribeController {
                         new docx_1.TableCell({
                             width: { size: 15, type: docx_1.WidthType.PERCENTAGE },
                             shading: { fill: '6366F1' },
-                            children: [new docx_1.Paragraph({ children: [new docx_1.TextRun({ text: 'Time', bold: true, color: 'FFFFFF' })] })],
+                            children: [
+                                new docx_1.Paragraph({
+                                    children: [
+                                        new docx_1.TextRun({ text: 'Time', bold: true, color: 'FFFFFF' }),
+                                    ],
+                                }),
+                            ],
                         }),
                         new docx_1.TableCell({
                             width: { size: 20, type: docx_1.WidthType.PERCENTAGE },
                             shading: { fill: '6366F1' },
-                            children: [new docx_1.Paragraph({ children: [new docx_1.TextRun({ text: 'Speaker', bold: true, color: 'FFFFFF' })] })],
+                            children: [
+                                new docx_1.Paragraph({
+                                    children: [
+                                        new docx_1.TextRun({
+                                            text: 'Speaker',
+                                            bold: true,
+                                            color: 'FFFFFF',
+                                        }),
+                                    ],
+                                }),
+                            ],
                         }),
                         new docx_1.TableCell({
                             width: { size: 65, type: docx_1.WidthType.PERCENTAGE },
                             shading: { fill: '6366F1' },
-                            children: [new docx_1.Paragraph({ children: [new docx_1.TextRun({ text: 'Dialogue / Utterance', bold: true, color: 'FFFFFF' })] })],
+                            children: [
+                                new docx_1.Paragraph({
+                                    children: [
+                                        new docx_1.TextRun({
+                                            text: 'Dialogue / Utterance',
+                                            bold: true,
+                                            color: 'FFFFFF',
+                                        }),
+                                    ],
+                                }),
+                            ],
                         }),
                     ],
                 }),
@@ -296,17 +362,34 @@ let TranscribeController = TranscribeController_1 = class TranscribeController {
                         new docx_1.TableCell({
                             width: { size: 15, type: docx_1.WidthType.PERCENTAGE },
                             shading: idx % 2 === 1 ? { fill: 'F8FAFC' } : undefined,
-                            children: [new docx_1.Paragraph({ children: [new docx_1.TextRun({ text: formatSimpleTimestamp(u.start) })] })],
+                            children: [
+                                new docx_1.Paragraph({
+                                    children: [
+                                        new docx_1.TextRun({ text: formatSimpleTimestamp(u.start) }),
+                                    ],
+                                }),
+                            ],
                         }),
                         new docx_1.TableCell({
                             width: { size: 20, type: docx_1.WidthType.PERCENTAGE },
                             shading: idx % 2 === 1 ? { fill: 'F8FAFC' } : undefined,
-                            children: [new docx_1.Paragraph({ children: [new docx_1.TextRun({ text: getSpeakerName(u.speaker), bold: true })] })],
+                            children: [
+                                new docx_1.Paragraph({
+                                    children: [
+                                        new docx_1.TextRun({
+                                            text: getSpeakerName(u.speaker),
+                                            bold: true,
+                                        }),
+                                    ],
+                                }),
+                            ],
                         }),
                         new docx_1.TableCell({
                             width: { size: 65, type: docx_1.WidthType.PERCENTAGE },
                             shading: idx % 2 === 1 ? { fill: 'F8FAFC' } : undefined,
-                            children: [new docx_1.Paragraph({ children: [new docx_1.TextRun({ text: u.text })] })],
+                            children: [
+                                new docx_1.Paragraph({ children: [new docx_1.TextRun({ text: u.text })] }),
+                            ],
                         }),
                     ],
                 }));
@@ -323,7 +406,10 @@ let TranscribeController = TranscribeController_1 = class TranscribeController {
                             }),
                             new docx_1.Paragraph({
                                 children: [
-                                    new docx_1.TextRun({ text: `Date: ${new Date(record.createdAt).toLocaleDateString()}`, italics: true }),
+                                    new docx_1.TextRun({
+                                        text: `Date: ${new Date(record.createdAt).toLocaleDateString()}`,
+                                        italics: true,
+                                    }),
                                 ],
                                 spacing: { after: 300 },
                             }),
@@ -331,11 +417,27 @@ let TranscribeController = TranscribeController_1 = class TranscribeController {
                                 width: { size: 100, type: docx_1.WidthType.PERCENTAGE },
                                 borders: {
                                     top: { style: docx_1.BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
-                                    bottom: { style: docx_1.BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
+                                    bottom: {
+                                        style: docx_1.BorderStyle.SINGLE,
+                                        size: 4,
+                                        color: 'E2E8F0',
+                                    },
                                     left: { style: docx_1.BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
-                                    right: { style: docx_1.BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
-                                    insideHorizontal: { style: docx_1.BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
-                                    insideVertical: { style: docx_1.BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
+                                    right: {
+                                        style: docx_1.BorderStyle.SINGLE,
+                                        size: 4,
+                                        color: 'E2E8F0',
+                                    },
+                                    insideHorizontal: {
+                                        style: docx_1.BorderStyle.SINGLE,
+                                        size: 4,
+                                        color: 'E2E8F0',
+                                    },
+                                    insideVertical: {
+                                        style: docx_1.BorderStyle.SINGLE,
+                                        size: 4,
+                                        color: 'E2E8F0',
+                                    },
                                 },
                                 rows: tableRows,
                             }),
@@ -364,12 +466,23 @@ let TranscribeController = TranscribeController_1 = class TranscribeController {
             }
             if (fs.existsSync(boldFontPath))
                 doc.font('ArialBold');
-            doc.fontSize(20).fillColor('#1E1B4B').text(record.title, { ellipsis: true });
+            doc
+                .fontSize(20)
+                .fillColor('#1E1B4B')
+                .text(record.title, { ellipsis: true });
             if (fs.existsSync(regularFontPath))
                 doc.font('ArialRegular');
-            doc.fontSize(10).fillColor('#64748B').text(`Date: ${new Date(record.createdAt).toLocaleDateString()}`);
+            doc
+                .fontSize(10)
+                .fillColor('#64748B')
+                .text(`Date: ${new Date(record.createdAt).toLocaleDateString()}`);
             doc.moveDown(1.5);
-            doc.strokeColor('#E2E8F0').lineWidth(1).moveTo(40, doc.y).lineTo(555, doc.y).stroke();
+            doc
+                .strokeColor('#E2E8F0')
+                .lineWidth(1)
+                .moveTo(40, doc.y)
+                .lineTo(555, doc.y)
+                .stroke();
             doc.moveDown(1.5);
             const utterances = record.utterances || [];
             utterances.forEach((u) => {
@@ -377,8 +490,13 @@ let TranscribeController = TranscribeController_1 = class TranscribeController {
                 const timeStr = `[${formatSimpleTimestamp(u.start)}]`;
                 if (fs.existsSync(boldFontPath))
                     doc.font('ArialBold');
-                doc.fontSize(10).fillColor('#7C3AED').text(timeStr, { continued: true });
-                doc.fillColor('#0F172A').text(` ${getSpeakerName(u.speaker)}:`, { continued: true });
+                doc
+                    .fontSize(10)
+                    .fillColor('#7C3AED')
+                    .text(timeStr, { continued: true });
+                doc
+                    .fillColor('#0F172A')
+                    .text(` ${getSpeakerName(u.speaker)}:`, { continued: true });
                 if (fs.existsSync(regularFontPath))
                     doc.font('ArialRegular');
                 doc.fillColor('#334155').text(` ${u.text}`);
@@ -403,55 +521,63 @@ __decorate([
         limits: { fileSize: 2 * 1024 * 1024 * 1024 },
     })),
     __param(0, (0, common_1.UploadedFile)()),
+    __param(1, (0, current_user_decorator_1.CurrentUser)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
+    __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", Promise)
 ], TranscribeController.prototype, "uploadFile", null);
 __decorate([
     (0, common_1.Get)('history'),
+    __param(0, (0, current_user_decorator_1.CurrentUser)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", []),
+    __metadata("design:paramtypes", [Object]),
     __metadata("design:returntype", void 0)
 ], TranscribeController.prototype, "getHistory", null);
 __decorate([
     (0, common_1.Get)('status/:id'),
     __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, current_user_decorator_1.CurrentUser)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
+    __metadata("design:paramtypes", [String, Object]),
     __metadata("design:returntype", Promise)
 ], TranscribeController.prototype, "getStatus", null);
 __decorate([
     (0, common_1.Delete)('history/:id'),
     __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, current_user_decorator_1.CurrentUser)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String]),
+    __metadata("design:paramtypes", [String, Object]),
     __metadata("design:returntype", void 0)
 ], TranscribeController.prototype, "deleteRecord", null);
 __decorate([
     (0, common_1.Get)('audio/:id'),
     __param(0, (0, common_1.Param)('id')),
-    __param(1, (0, common_1.Res)()),
+    __param(1, (0, current_user_decorator_1.CurrentUser)()),
+    __param(2, (0, common_1.Res)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, Object]),
-    __metadata("design:returntype", Promise)
+    __metadata("design:paramtypes", [String, Object, Object]),
+    __metadata("design:returntype", void 0)
 ], TranscribeController.prototype, "getAudio", null);
 __decorate([
     (0, common_1.Post)('rename-speaker'),
     __param(0, (0, common_1.Body)()),
+    __param(1, (0, current_user_decorator_1.CurrentUser)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [Object]),
+    __metadata("design:paramtypes", [Object, Object]),
     __metadata("design:returntype", void 0)
 ], TranscribeController.prototype, "renameSpeaker", null);
 __decorate([
     (0, common_1.Get)('export/:id'),
     __param(0, (0, common_1.Param)('id')),
     __param(1, (0, common_1.Query)('format')),
-    __param(2, (0, common_1.Res)()),
+    __param(2, (0, current_user_decorator_1.CurrentUser)()),
+    __param(3, (0, common_1.Res)()),
     __metadata("design:type", Function),
-    __metadata("design:paramtypes", [String, String, Object]),
+    __metadata("design:paramtypes", [String, String, Object, Object]),
     __metadata("design:returntype", Promise)
 ], TranscribeController.prototype, "exportTranscript", null);
 exports.TranscribeController = TranscribeController = TranscribeController_1 = __decorate([
+    (0, common_1.UseGuards)(jwt_auth_guard_1.JwtAuthGuard),
     (0, common_1.Controller)('transcribe'),
     __metadata("design:paramtypes", [transcribe_service_1.TranscribeService,
         database_service_1.DatabaseService])

@@ -10,6 +10,8 @@ import TranscriptWorkspace from '@/components/TranscriptWorkspace';
 import CustomAudioPlayer from '@/components/CustomAudioPlayer';
 import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
 import { TranscriptRecord, transcribeApi } from '@/lib/api';
+import { useAuth } from '@/contexts/AuthContext';
+import { useRouter } from 'next/navigation';
 
 const AppContainer = styled(Box)`
   display: flex;
@@ -52,6 +54,8 @@ const ShimmerLoading = styled(Paper)`
 `;
 
 export default function Home() {
+  const router = useRouter();
+  const { user, loading: authLoading, logout } = useAuth();
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null);
   const [loadingSetup, setLoadingSetup] = useState(true);
   const [history, setHistory] = useState<TranscriptRecord[]>([]);
@@ -68,8 +72,13 @@ export default function Home() {
     }
   };
 
-  // Initialize: check setup status and load history
   useEffect(() => {
+    if (!authLoading && !user) router.replace('/login');
+  }, [authLoading, user, router]);
+
+  // Initialize only after an authenticated session is available.
+  useEffect(() => {
+    if (authLoading || !user) return;
     async function init() {
       try {
         const setup = await transcribeApi.checkSetup();
@@ -86,7 +95,7 @@ export default function Home() {
       }
     }
     init();
-  }, []);
+  }, [authLoading, user]);
 
   // Poll status if selected record is not completed/failed
   useEffect(() => {
@@ -157,7 +166,7 @@ export default function Home() {
     setCurrentTimeMs(ms);
   };
 
-  if (loadingSetup) {
+  if (authLoading || !user || loadingSetup) {
     return (
       <Box sx={{ display: 'flex', height: '100vh', alignItems: 'center', justifyContent: 'center', bgcolor: '#0b0f19' }}>
         <CircularProgress color="primary" />
@@ -180,6 +189,16 @@ export default function Home() {
       />
 
       <ContentArea>
+        <Button
+          size="small"
+          onClick={async () => {
+            await logout();
+            router.replace('/login');
+          }}
+          sx={{ position: 'absolute', top: 16, right: 20, zIndex: 12 }}
+        >
+          Log out
+        </Button>
         {selectedRecord ? (
           // We have a selected transcript
           selectedRecord.status === 'completed' ? (
