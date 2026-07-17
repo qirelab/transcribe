@@ -138,7 +138,7 @@ let TranscribeService = TranscribeService_1 = class TranscribeService {
         const transcript = await client.transcripts.submit({
             audio_url: uploadUrl,
             speaker_labels: true,
-            speech_models: ['universal-3-pro', 'universal-2'],
+            speech_models: ['universal-3-5-pro', 'universal-2'],
         });
         const record = {
             id: transcript.id,

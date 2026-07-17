@@ -60,6 +60,31 @@ const docx_1 = require("docx");
 const pdfkit_1 = __importDefault(require("pdfkit"));
 const jwt_auth_guard_1 = require("../auth/jwt-auth.guard");
 const current_user_decorator_1 = require("../auth/current-user.decorator");
+const SUPPORTED_AUDIO_EXTENSIONS = new Set([
+    '.mp3',
+    '.wav',
+    '.m4a',
+    '.aac',
+    '.ogg',
+    '.flac',
+    '.webm',
+]);
+const SUPPORTED_VIDEO_EXTENSIONS = new Set([
+    '.mp4',
+    '.mov',
+    '.mkv',
+    '.avi',
+    '.webm',
+    '.m4v',
+]);
+function isSupportedMedia(file) {
+    const mime = (file.mimetype || '').toLowerCase();
+    if (mime.startsWith('audio/') || mime.startsWith('video/'))
+        return true;
+    const extension = (file.originalname.match(/\.[^.]+$/)?.[0] || '').toLowerCase();
+    return (SUPPORTED_AUDIO_EXTENSIONS.has(extension) ||
+        SUPPORTED_VIDEO_EXTENSIONS.has(extension));
+}
 function formatSimpleTimestamp(ms) {
     const seconds = Math.floor(ms / 1000);
     const minutes = Math.floor(seconds / 60);
@@ -95,6 +120,9 @@ let TranscribeController = TranscribeController_1 = class TranscribeController {
     async uploadFile(file, user) {
         if (!file) {
             throw new common_1.BadRequestException('No file uploaded or file exceeds the 2GB limit.');
+        }
+        if (!isSupportedMedia(file)) {
+            throw new common_1.BadRequestException('Unsupported media format. Please upload an audio or video file.');
         }
         try {
             this.logger.log(`Received file: ${file.originalname} (${(file.size / (1024 * 1024)).toFixed(1)}MB)`);

@@ -37,6 +37,34 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { CurrentUser } from '../auth/current-user.decorator';
 import type { AuthUser } from '../auth/auth.types';
 
+const SUPPORTED_AUDIO_EXTENSIONS = new Set([
+  '.mp3',
+  '.wav',
+  '.m4a',
+  '.aac',
+  '.ogg',
+  '.flac',
+  '.webm',
+]);
+const SUPPORTED_VIDEO_EXTENSIONS = new Set([
+  '.mp4',
+  '.mov',
+  '.mkv',
+  '.avi',
+  '.webm',
+  '.m4v',
+]);
+
+function isSupportedMedia(file: Express.Multer.File): boolean {
+  const mime = (file.mimetype || '').toLowerCase();
+  if (mime.startsWith('audio/') || mime.startsWith('video/')) return true;
+  const extension = (file.originalname.match(/\.[^.]+$/)?.[0] || '').toLowerCase();
+  return (
+    SUPPORTED_AUDIO_EXTENSIONS.has(extension) ||
+    SUPPORTED_VIDEO_EXTENSIONS.has(extension)
+  );
+}
+
 // Helper function to format milliseconds to a simple clean timestamp (HH:MM:SS or MM:SS)
 function formatSimpleTimestamp(ms: number): string {
   const seconds = Math.floor(ms / 1000);
@@ -93,6 +121,11 @@ export class TranscribeController {
     if (!file) {
       throw new BadRequestException(
         'No file uploaded or file exceeds the 2GB limit.',
+      );
+    }
+    if (!isSupportedMedia(file)) {
+      throw new BadRequestException(
+        'Unsupported media format. Please upload an audio or video file.',
       );
     }
 
