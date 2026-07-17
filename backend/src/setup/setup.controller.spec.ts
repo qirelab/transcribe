@@ -2,6 +2,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { SetupController } from './setup.controller';
 import { DatabaseService } from '../database/database.service';
 import { BadRequestException } from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 describe('SetupController', () => {
   let controller: SetupController;
@@ -20,7 +21,10 @@ describe('SetupController', () => {
           useValue: mockDbService,
         },
       ],
-    }).compile();
+    })
+      .overrideGuard(JwtAuthGuard)
+      .useValue({ canActivate: () => true })
+      .compile();
 
     controller = module.get<SetupController>(SetupController);
   });

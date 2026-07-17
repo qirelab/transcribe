@@ -12,6 +12,7 @@ import {
   BadRequestException,
   NotFoundException,
   Logger,
+  UseGuards,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { TranscribeService } from './transcribe.service';
@@ -19,8 +20,22 @@ import { DatabaseService } from '../database/database.service';
 import type { Response } from 'express';
 import * as fs from 'fs';
 import * as ExcelJS from 'exceljs';
-import { Document, Packer, Paragraph, Table, TableRow, TableCell, WidthType, BorderStyle, TextRun, HeadingLevel } from 'docx';
+import {
+  Document,
+  Packer,
+  Paragraph,
+  Table,
+  TableRow,
+  TableCell,
+  WidthType,
+  BorderStyle,
+  TextRun,
+  HeadingLevel,
+} from 'docx';
 import PDFDocument from 'pdfkit';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { CurrentUser } from '../auth/current-user.decorator';
+import type { AuthUser } from '../auth/auth.types';
 
 // Helper function to format milliseconds to a simple clean timestamp (HH:MM:SS or MM:SS)
 function formatSimpleTimestamp(ms: number): string {
@@ -54,6 +69,7 @@ function formatTimestamp(ms: number, isSrt: boolean): string {
   return `${hh}:${mm}:${ss}${sep}${mmm}`;
 }
 
+@UseGuards(JwtAuthGuard)
 @Controller('transcribe')
 export class TranscribeController {
   private readonly logger = new Logger(TranscribeController.name);
@@ -70,7 +86,10 @@ export class TranscribeController {
       limits: { fileSize: 2 * 1024 * 1024 * 1024 }, // 2GB soft limit
     }),
   )
-  async uploadFile(@UploadedFile() file: Express.Multer.File) {
+  async uploadFile(
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: AuthUser,
+  ) {
     if (!file) {
       throw new BadRequestException(
         'No file uploaded or file exceeds the 2GB limit.',
@@ -86,6 +105,7 @@ export class TranscribeController {
       const id = await this.transcribeService.startTranscription(
         file.path,
         file.originalname,
+        user.id,
       );
 
       // Clean up the original local upload file after submitting to AssemblyAI
@@ -123,14 +143,14 @@ export class TranscribeController {
   }
 
   @Get('history')
-  getHistory() {
-    return this.dbService.getTranscripts();
+  getHistory(@CurrentUser() user: AuthUser) {
+    return this.dbService.getTranscripts(user.id);
   }
 
   @Get('status/:id')
-  async getStatus(@Param('id') id: string) {
+  async getStatus(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     try {
-      return await this.transcribeService.checkStatusAndProcess(id);
+      return await this.transcribeService.checkStatusAndProcess(id, user.id);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : 'Transcript not found.';
       throw new NotFoundException(message);
@@ -138,8 +158,10 @@ export class TranscribeController {
   }
 
   @Delete('history/:id')
-  deleteRecord(@Param('id') id: string) {
-    this.dbService.deleteTranscript(id);
+  deleteRecord(@Param('id') id: string, @CurrentUser() user: AuthUser) {
+    if (!this.dbService.deleteTranscript(id, user.id)) {
+      throw new NotFoundException('Transcript not found');
+    }
 
     // Clean up corresponding audio file from uploads directory
     try {
@@ -149,14 +171,24 @@ export class TranscribeController {
         this.logger.log(`Deleted corresponding audio file: ${filePath}`);
       }
     } catch (err) {
-      this.logger.error(`Failed to delete corresponding audio file for transcript ${id}:`, err);
+      this.logger.error(
+        `Failed to delete corresponding audio file for transcript ${id}:`,
+        err,
+      );
     }
 
     return { success: true };
   }
 
   @Get('audio/:id')
-  async getAudio(@Param('id') id: string, @Res() res: Response) {
+  getAudio(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Res() res: Response,
+  ) {
+    if (!this.dbService.getTranscript(id, user.id)) {
+      throw new NotFoundException('Audio file not found.');
+    }
     const filePath = this.transcribeService.getAudioFilePath(id);
     if (!filePath || !fs.existsSync(filePath)) {
       throw new NotFoundException('Audio file not found.');
@@ -165,7 +197,10 @@ export class TranscribeController {
   }
 
   @Post('rename-speaker')
-  renameSpeaker(@Body() body: { id: string; speaker: string; name: string }) {
+  renameSpeaker(
+    @Body() body: { id: string; speaker: string; name: string },
+    @CurrentUser() user: AuthUser,
+  ) {
     const { id, speaker, name } = body;
     if (!id || !speaker || name === undefined) {
       throw new BadRequestException(
@@ -173,7 +208,7 @@ export class TranscribeController {
       );
     }
 
-    const record = this.dbService.getTranscript(id);
+    const record = this.dbService.getTranscript(id, user.id);
     if (!record) {
       throw new NotFoundException('Transcript not found');
     }
@@ -190,9 +225,10 @@ export class TranscribeController {
   async exportTranscript(
     @Param('id') id: string,
     @Query('format') format: string,
+    @CurrentUser() user: AuthUser,
     @Res() res: Response,
   ) {
-    const record = this.dbService.getTranscript(id);
+    const record = this.dbService.getTranscript(id, user.id);
     if (!record) {
       throw new NotFoundException('Transcript not found');
     }
@@ -259,7 +295,12 @@ export class TranscribeController {
       ];
 
       const headerRow = worksheet.getRow(1);
-      headerRow.font = { name: 'Arial', size: 11, bold: true, color: { argb: 'FFFFFF' } };
+      headerRow.font = {
+        name: 'Arial',
+        size: 11,
+        bold: true,
+        color: { argb: 'FFFFFF' },
+      };
       headerRow.fill = {
         type: 'pattern',
         pattern: 'solid',
@@ -313,7 +354,7 @@ export class TranscribeController {
       return res.end();
     } else if (selectedFormat === 'docx') {
       const utterances = record.utterances || [];
-      
+
       const tableRows = [
         new TableRow({
           tableHeader: true,
@@ -321,17 +362,43 @@ export class TranscribeController {
             new TableCell({
               width: { size: 15, type: WidthType.PERCENTAGE },
               shading: { fill: '6366F1' },
-              children: [new Paragraph({ children: [new TextRun({ text: 'Time', bold: true, color: 'FFFFFF' })] })],
+              children: [
+                new Paragraph({
+                  children: [
+                    new TextRun({ text: 'Time', bold: true, color: 'FFFFFF' }),
+                  ],
+                }),
+              ],
             }),
             new TableCell({
               width: { size: 20, type: WidthType.PERCENTAGE },
               shading: { fill: '6366F1' },
-              children: [new Paragraph({ children: [new TextRun({ text: 'Speaker', bold: true, color: 'FFFFFF' })] })],
+              children: [
+                new Paragraph({
+                  children: [
+                    new TextRun({
+                      text: 'Speaker',
+                      bold: true,
+                      color: 'FFFFFF',
+                    }),
+                  ],
+                }),
+              ],
             }),
             new TableCell({
               width: { size: 65, type: WidthType.PERCENTAGE },
               shading: { fill: '6366F1' },
-              children: [new Paragraph({ children: [new TextRun({ text: 'Dialogue / Utterance', bold: true, color: 'FFFFFF' })] })],
+              children: [
+                new Paragraph({
+                  children: [
+                    new TextRun({
+                      text: 'Dialogue / Utterance',
+                      bold: true,
+                      color: 'FFFFFF',
+                    }),
+                  ],
+                }),
+              ],
             }),
           ],
         }),
@@ -344,17 +411,34 @@ export class TranscribeController {
               new TableCell({
                 width: { size: 15, type: WidthType.PERCENTAGE },
                 shading: idx % 2 === 1 ? { fill: 'F8FAFC' } : undefined,
-                children: [new Paragraph({ children: [new TextRun({ text: formatSimpleTimestamp(u.start) })] })],
+                children: [
+                  new Paragraph({
+                    children: [
+                      new TextRun({ text: formatSimpleTimestamp(u.start) }),
+                    ],
+                  }),
+                ],
               }),
               new TableCell({
                 width: { size: 20, type: WidthType.PERCENTAGE },
                 shading: idx % 2 === 1 ? { fill: 'F8FAFC' } : undefined,
-                children: [new Paragraph({ children: [new TextRun({ text: getSpeakerName(u.speaker), bold: true })] })],
+                children: [
+                  new Paragraph({
+                    children: [
+                      new TextRun({
+                        text: getSpeakerName(u.speaker),
+                        bold: true,
+                      }),
+                    ],
+                  }),
+                ],
               }),
               new TableCell({
                 width: { size: 65, type: WidthType.PERCENTAGE },
                 shading: idx % 2 === 1 ? { fill: 'F8FAFC' } : undefined,
-                children: [new Paragraph({ children: [new TextRun({ text: u.text })] })],
+                children: [
+                  new Paragraph({ children: [new TextRun({ text: u.text })] }),
+                ],
               }),
             ],
           }),
@@ -373,7 +457,10 @@ export class TranscribeController {
               }),
               new Paragraph({
                 children: [
-                  new TextRun({ text: `Date: ${new Date(record.createdAt).toLocaleDateString()}`, italics: true }),
+                  new TextRun({
+                    text: `Date: ${new Date(record.createdAt).toLocaleDateString()}`,
+                    italics: true,
+                  }),
                 ],
                 spacing: { after: 300 },
               }),
@@ -381,11 +468,27 @@ export class TranscribeController {
                 width: { size: 100, type: WidthType.PERCENTAGE },
                 borders: {
                   top: { style: BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
-                  bottom: { style: BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
+                  bottom: {
+                    style: BorderStyle.SINGLE,
+                    size: 4,
+                    color: 'E2E8F0',
+                  },
                   left: { style: BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
-                  right: { style: BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
-                  insideHorizontal: { style: BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
-                  insideVertical: { style: BorderStyle.SINGLE, size: 4, color: 'E2E8F0' },
+                  right: {
+                    style: BorderStyle.SINGLE,
+                    size: 4,
+                    color: 'E2E8F0',
+                  },
+                  insideHorizontal: {
+                    style: BorderStyle.SINGLE,
+                    size: 4,
+                    color: 'E2E8F0',
+                  },
+                  insideVertical: {
+                    style: BorderStyle.SINGLE,
+                    size: 4,
+                    color: 'E2E8F0',
+                  },
                 },
                 rows: tableRows,
               }),
@@ -422,28 +525,44 @@ export class TranscribeController {
       }
 
       if (fs.existsSync(boldFontPath)) doc.font('ArialBold');
-      doc.fontSize(20).fillColor('#1E1B4B').text(record.title, { ellipsis: true });
-      
+      doc
+        .fontSize(20)
+        .fillColor('#1E1B4B')
+        .text(record.title, { ellipsis: true });
+
       if (fs.existsSync(regularFontPath)) doc.font('ArialRegular');
-      doc.fontSize(10).fillColor('#64748B').text(`Date: ${new Date(record.createdAt).toLocaleDateString()}`);
+      doc
+        .fontSize(10)
+        .fillColor('#64748B')
+        .text(`Date: ${new Date(record.createdAt).toLocaleDateString()}`);
       doc.moveDown(1.5);
 
-      doc.strokeColor('#E2E8F0').lineWidth(1).moveTo(40, doc.y).lineTo(555, doc.y).stroke();
+      doc
+        .strokeColor('#E2E8F0')
+        .lineWidth(1)
+        .moveTo(40, doc.y)
+        .lineTo(555, doc.y)
+        .stroke();
       doc.moveDown(1.5);
 
       const utterances = record.utterances || [];
       utterances.forEach((u) => {
         doc.save();
-        
+
         const timeStr = `[${formatSimpleTimestamp(u.start)}]`;
         if (fs.existsSync(boldFontPath)) doc.font('ArialBold');
-        doc.fontSize(10).fillColor('#7C3AED').text(timeStr, { continued: true });
-        
-        doc.fillColor('#0F172A').text(` ${getSpeakerName(u.speaker)}:`, { continued: true });
-        
+        doc
+          .fontSize(10)
+          .fillColor('#7C3AED')
+          .text(timeStr, { continued: true });
+
+        doc
+          .fillColor('#0F172A')
+          .text(` ${getSpeakerName(u.speaker)}:`, { continued: true });
+
         if (fs.existsSync(regularFontPath)) doc.font('ArialRegular');
         doc.fillColor('#334155').text(` ${u.text}`);
-        
+
         doc.restore();
         doc.moveDown(0.8);
       });

@@ -48,15 +48,26 @@ describe('DatabaseService', () => {
   describe('getTranscripts', () => {
     it('should return loaded transcripts from file', () => {
       const mockTranscripts = [
-        { id: 'tx-123', title: 'test.mp3', status: 'completed' },
+        {
+          id: 'tx-123',
+          userId: 'user-1',
+          title: 'test.mp3',
+          status: 'completed',
+        },
+        {
+          id: 'tx-456',
+          userId: 'user-2',
+          title: 'private.mp3',
+          status: 'completed',
+        },
       ];
       (fs.readFileSync as jest.Mock).mockReturnValue(
         JSON.stringify(mockTranscripts),
       );
       (fs.existsSync as jest.Mock).mockReturnValue(true);
 
-      const result = service.getTranscripts();
-      expect(result).toEqual(mockTranscripts);
+      const result = service.getTranscripts('user-1');
+      expect(result).toEqual([mockTranscripts[0]]);
     });
 
     it('should return empty array if read fails', () => {
@@ -64,7 +75,7 @@ describe('DatabaseService', () => {
         throw new Error('Read error');
       });
 
-      const result = service.getTranscripts();
+      const result = service.getTranscripts('user-1');
       expect(result).toEqual([]);
     });
   });
