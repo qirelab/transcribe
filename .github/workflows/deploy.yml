@@ -185,16 +185,18 @@ jobs:
               --no-fund \
               --prefer-offline
 
-            # Backend PM2 (NestJS reads process.env directly — load .env into env)
+            # Backend PM2 (NestJS reads process.env directly — Node loads .env)
+            # NOTE: do NOT `source .env` — dotenv format is not shell syntax,
+            # values with spaces make the shell try to execute words (exit 127).
+            # Node 20's --env-file parses dotenv correctly; existing env vars
+            # (like PORT below) take precedence over the file.
             echo "Restarting backend..."
             cd "$DEPLOY_DIR/backend"
-            set -a
-            source .env
-            set +a
             if pm2 describe $PM2_BE > /dev/null 2>&1; then
               pm2 delete $PM2_BE
             fi
-            PORT=$BE_PORT pm2 start dist/main.js --name $PM2_BE --update-env
+            PORT=$BE_PORT pm2 start dist/main.js --name $PM2_BE --update-env \
+              --node-args="--env-file=$DEPLOY_DIR/backend/.env"
             pm2 show $PM2_BE
 
             # Frontend PM2 (Next.js auto-loads .env from cwd)
