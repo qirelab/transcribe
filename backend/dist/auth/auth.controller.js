@@ -31,7 +31,7 @@ let AuthController = class AuthController {
         await this.authService.register(body.email, body.password);
         return {
             success: true,
-            message: 'Check your email to verify your account',
+            message: 'Account created. You can log in now.',
         };
     }
     verifyEmail(body) {
@@ -41,7 +41,7 @@ let AuthController = class AuthController {
         await this.authService.resendVerification(body.email);
         return {
             success: true,
-            message: 'If the account exists, a verification email was sent',
+            message: 'Email verification is disabled',
         };
     }
     async login(body, response) {

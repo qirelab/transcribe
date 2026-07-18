@@ -16,7 +16,5 @@ export declare class AuthService {
     }>;
     getUser(id: string): AuthUser;
     private normalizeEmail;
-    private hashToken;
     private toAuthUser;
-    private sendVerificationEmail;
 }

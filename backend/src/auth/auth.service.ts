@@ -6,8 +6,7 @@ import {
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { compare, hash } from 'bcryptjs';
-import { createHash, randomBytes, randomUUID } from 'crypto';
-import * as nodemailer from 'nodemailer';
+import { randomUUID } from 'crypto';
 import { DatabaseService, UserRecord } from '../database/database.service';
 import type { AuthUser } from './auth.types';
 
@@ -44,66 +43,26 @@ export class AuthService {
     }
 
     const now = new Date();
-    const token = randomBytes(32).toString('hex');
     const user: UserRecord = {
       id: randomUUID(),
       email,
       passwordHash: await hash(password, 12),
-      emailVerified: false,
-      verificationTokenHash: this.hashToken(token),
-      verificationTokenExpiresAt: new Date(
-        now.getTime() + 24 * 60 * 60 * 1000,
-      ).toISOString(),
+      emailVerified: true,
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
     };
     this.database.saveUser(user);
-
-    try {
-      await this.sendVerificationEmail(user.email, token);
-    } catch (error) {
-      // Do not leave an unusable account that cannot be registered again.
-      this.database.deleteUser(user.id);
-      throw error;
-    }
   }
 
   async resendVerification(rawEmail: string): Promise<void> {
     const email = this.normalizeEmail(rawEmail);
     const user = this.database.findUserByEmail(email);
-    if (!user || user.emailVerified) return;
-
-    const token = randomBytes(32).toString('hex');
-    user.verificationTokenHash = this.hashToken(token);
-    user.verificationTokenExpiresAt = new Date(
-      Date.now() + 24 * 60 * 60 * 1000,
-    ).toISOString();
-    user.updatedAt = new Date().toISOString();
-    this.database.saveUser(user);
-    await this.sendVerificationEmail(user.email, token);
+    if (!user) return;
   }
 
   verifyEmail(token: string): AuthUser {
-    const tokenHash = this.hashToken(token);
-    const user = this.database
-      .getUsers()
-      .find((candidate) => candidate.verificationTokenHash === tokenHash);
-    if (
-      !user ||
-      !user.verificationTokenExpiresAt ||
-      new Date(user.verificationTokenExpiresAt).getTime() <= Date.now()
-    ) {
-      throw new UnauthorizedException(
-        'Verification link is invalid or expired',
-      );
-    }
-
-    user.emailVerified = true;
-    delete user.verificationTokenHash;
-    delete user.verificationTokenExpiresAt;
-    user.updatedAt = new Date().toISOString();
-    this.database.saveUser(user);
-    return this.toAuthUser(user);
+    void token;
+    throw new UnauthorizedException('Email verification is disabled');
   }
 
   async login(
@@ -118,9 +77,6 @@ export class AuthService {
     if (!user || !(await compare(password, user.passwordHash))) {
       throw new UnauthorizedException('Invalid email or password');
     }
-    if (!user.emailVerified) {
-      throw new ForbiddenException('Email address has not been verified');
-    }
 
     const authUser = this.toAuthUser(user);
     return {
@@ -131,7 +87,7 @@ export class AuthService {
 
   getUser(id: string): AuthUser {
     const user = this.database.findUserById(id);
-    if (!user || !user.emailVerified) {
+    if (!user) {
       throw new UnauthorizedException('User no longer exists');
     }
     return this.toAuthUser(user);
@@ -141,47 +97,7 @@ export class AuthService {
     return email.trim().toLowerCase();
   }
 
-  private hashToken(token: string): string {
-    return createHash('sha256').update(token).digest('hex');
-  }
-
   private toAuthUser(user: UserRecord): AuthUser {
     return { id: user.id, email: user.email };
-  }
-
-  private async sendVerificationEmail(
-    email: string,
-    token: string,
-  ): Promise<void> {
-    const host = process.env.SMTP_HOST;
-    const port = Number(process.env.SMTP_PORT ?? 587);
-    const from = process.env.SMTP_FROM;
-    if (!host || !from) {
-      throw new Error('SMTP_HOST and SMTP_FROM must be configured');
-    }
-
-    const transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure: process.env.SMTP_SECURE === 'true',
-      auth: process.env.SMTP_USER
-        ? {
-            user: process.env.SMTP_USER,
-            pass: process.env.SMTP_PASSWORD,
-          }
-        : undefined,
-    });
-    const frontendUrl = (
-      process.env.FRONTEND_URL ?? 'http://localhost:3000'
-    ).replace(/\/$/, '');
-    const verificationUrl = `${frontendUrl}/verify-email?token=${encodeURIComponent(token)}`;
-
-    await transporter.sendMail({
-      from,
-      to: email,
-      subject: 'Verify your Transcribe account',
-      text: `Confirm your email address by opening this link: ${verificationUrl}`,
-      html: `<p>Confirm your email address to use Transcribe:</p><p><a href="${verificationUrl}">Verify email</a></p><p>This link expires in 24 hours.</p>`,
-    });
   }
 }
