@@ -56,11 +56,22 @@ const UtilityPanel = styled(Paper)`
 
 const TopActionBar = styled(Box)`
   display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
   justify-content: space-between;
   align-items: center;
   padding: 16px 40px;
+  /* Reserve room on the right for the always-visible Log out control
+     (absolutely positioned by the parent page) so it never overlaps
+     the search field / Export button in this row. */
+  padding-right: 140px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   background: rgba(11, 15, 25, 0.3);
+
+  @media (max-width: 720px) {
+    padding: 16px 20px;
+    padding-right: 120px;
+  }
 `;
 
 const UtteranceBox = styled(Box)<{ $isActive: boolean }>`
@@ -231,7 +242,7 @@ export default function TranscriptWorkspace({
           </Box>
         </Box>
 
-        <Box sx={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+        <Box sx={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <TextField
             size="small"
             placeholder="Search transcript..."
@@ -247,7 +258,7 @@ export default function TranscriptWorkspace({
               },
             }}
             sx={{
-              width: 250,
+              width: { xs: 150, sm: 200, md: 250 },
               '& .MuiOutlinedInput-root': {
                 borderRadius: '8px',
                 backgroundColor: 'rgba(255, 255, 255, 0.02)',

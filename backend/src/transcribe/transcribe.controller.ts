@@ -81,6 +81,50 @@ function formatSimpleTimestamp(ms: number): string {
   return `${mm}:${ss}`;
 }
 
+// Builds a filesystem-safe export filename while preserving non-Latin
+// scripts (e.g. Cyrillic) instead of stripping them to underscores.
+function sanitizeFilename(title: string): string {
+  const cleaned = title
+    .replace(/[\x00-\x1f\x7f<>:"/\\|?*]/g, '_') // illegal on Windows/POSIX filesystems
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[. ]+$/g, ''); // trailing dots/spaces are stripped by Windows
+  return cleaned.length > 0 ? cleaned : 'transcript';
+}
+
+// Content-Disposition with both an ASCII-safe `filename` fallback and an
+// RFC 5987 `filename*` so browsers display the exact Unicode file name.
+function buildContentDisposition(filename: string): string {
+  const asciiFallback = filename.replace(/[^\x20-\x7e]/g, '_');
+  return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+// PDFKit's standard fonts (Helvetica, etc.) only cover Latin glyphs, so
+// Cyrillic text renders blank unless a Unicode-capable TTF is embedded.
+// Try common install paths for a system font that covers Cyrillic across
+// the platforms this app is likely to run on (macOS dev, Windows dev,
+// Linux server deployments), and fall back to the standard font otherwise.
+const CYRILLIC_CAPABLE_REGULAR_FONTS = [
+  '/System/Library/Fonts/Supplemental/Arial.ttf',
+  'C:\\Windows\\Fonts\\arial.ttf',
+  '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+  '/usr/share/fonts/dejavu/DejaVuSans.ttf',
+  '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+  '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf',
+];
+const CYRILLIC_CAPABLE_BOLD_FONTS = [
+  '/System/Library/Fonts/Supplemental/Arial Bold.ttf',
+  'C:\\Windows\\Fonts\\arialbd.ttf',
+  '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+  '/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf',
+  '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+  '/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf',
+];
+
+function resolveFirstExistingFont(paths: string[]): string | null {
+  return paths.find((p) => fs.existsSync(p)) ?? null;
+}
+
 // Helper function to format milliseconds to SRT/VTT timestamp
 function formatTimestamp(ms: number, isSrt: boolean): string {
   const seconds = Math.floor(ms / 1000);
@@ -267,7 +311,7 @@ export class TranscribeController {
     }
 
     const selectedFormat = (format || 'txt').toLowerCase();
-    const safeTitle = record.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    const safeTitle = sanitizeFilename(record.title);
 
     // Map speaker ID (e.g. "A" or "1") to custom name, fallback to "Speaker A"
     const getSpeakerName = (sp: string) => {
@@ -297,7 +341,7 @@ export class TranscribeController {
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="${safeTitle}.${selectedFormat}"`,
+        buildContentDisposition(`${safeTitle}.${selectedFormat}`),
       );
       return res.send(content);
     } else if (selectedFormat === 'txt') {
@@ -313,7 +357,7 @@ export class TranscribeController {
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="${safeTitle}.txt"`,
+        buildContentDisposition(`${safeTitle}.txt`),
       );
       return res.send(content);
     } else if (selectedFormat === 'xlsx') {
@@ -380,7 +424,7 @@ export class TranscribeController {
       );
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="${safeTitle}.xlsx"`,
+        buildContentDisposition(`${safeTitle}.xlsx`),
       );
 
       await workbook.xlsx.write(res);
@@ -537,33 +581,35 @@ export class TranscribeController {
       );
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="${safeTitle}.docx"`,
+        buildContentDisposition(`${safeTitle}.docx`),
       );
       return res.send(buffer);
     } else if (selectedFormat === 'pdf') {
       const doc = new PDFDocument({ margin: 40, size: 'A4' });
 
-      const regularFontPath = '/System/Library/Fonts/Supplemental/Arial.ttf';
-      const boldFontPath = '/System/Library/Fonts/Supplemental/Arial Bold.ttf';
+      const regularFontPath = resolveFirstExistingFont(
+        CYRILLIC_CAPABLE_REGULAR_FONTS,
+      );
+      const boldFontPath = resolveFirstExistingFont(CYRILLIC_CAPABLE_BOLD_FONTS);
 
-      if (fs.existsSync(regularFontPath)) {
+      if (regularFontPath) {
         doc.registerFont('ArialRegular', regularFontPath);
         doc.font('ArialRegular');
       } else {
         doc.font('Helvetica');
       }
 
-      if (fs.existsSync(boldFontPath)) {
+      if (boldFontPath) {
         doc.registerFont('ArialBold', boldFontPath);
       }
 
-      if (fs.existsSync(boldFontPath)) doc.font('ArialBold');
+      if (boldFontPath) doc.font('ArialBold');
       doc
         .fontSize(20)
         .fillColor('#1E1B4B')
         .text(record.title, { ellipsis: true });
 
-      if (fs.existsSync(regularFontPath)) doc.font('ArialRegular');
+      if (regularFontPath) doc.font('ArialRegular');
       doc
         .fontSize(10)
         .fillColor('#64748B')
@@ -583,7 +629,7 @@ export class TranscribeController {
         doc.save();
 
         const timeStr = `[${formatSimpleTimestamp(u.start)}]`;
-        if (fs.existsSync(boldFontPath)) doc.font('ArialBold');
+        if (boldFontPath) doc.font('ArialBold');
         doc
           .fontSize(10)
           .fillColor('#7C3AED')
@@ -593,7 +639,7 @@ export class TranscribeController {
           .fillColor('#0F172A')
           .text(` ${getSpeakerName(u.speaker)}:`, { continued: true });
 
-        if (fs.existsSync(regularFontPath)) doc.font('ArialRegular');
+        if (regularFontPath) doc.font('ArialRegular');
         doc.fillColor('#334155').text(` ${u.text}`);
 
         doc.restore();
@@ -603,7 +649,7 @@ export class TranscribeController {
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="${safeTitle}.pdf"`,
+        buildContentDisposition(`${safeTitle}.pdf`),
       );
 
       doc.pipe(res);
