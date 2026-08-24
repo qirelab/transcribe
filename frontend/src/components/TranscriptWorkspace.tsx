@@ -61,9 +61,6 @@ const TopActionBar = styled(Box)`
   justify-content: space-between;
   align-items: center;
   padding: 16px 40px;
-  /* Reserve room on the right for the always-visible Log out control
-     (absolutely positioned by the parent page) so it never overlaps
-     the search field / Export button in this row. */
   padding-right: 140px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   background: rgba(11, 15, 25, 0.3);
@@ -231,8 +228,18 @@ export default function TranscriptWorkspace({
           >
             <ArrowBackIcon sx={{ fontSize: 20 }} />
           </IconButton>
-          <Box>
-            <Typography variant="h5" sx={{ fontWeight: 800 }}>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography
+              variant="h5"
+              sx={{
+                fontWeight: 800,
+                maxWidth: 'clamp(70px, calc(100vw - 610px), 560px)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={record.title}
+            >
               {record.title}
             </Typography>
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>

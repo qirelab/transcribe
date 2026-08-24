@@ -81,29 +81,20 @@ function formatSimpleTimestamp(ms: number): string {
   return `${mm}:${ss}`;
 }
 
-// Builds a filesystem-safe export filename while preserving non-Latin
-// scripts (e.g. Cyrillic) instead of stripping them to underscores.
 function sanitizeFilename(title: string): string {
   const cleaned = title
-    .replace(/[\x00-\x1f\x7f<>:"/\\|?*]/g, '_') // illegal on Windows/POSIX filesystems
+    .replace(/[\x00-\x1f\x7f<>:"/\\|?*]/g, '_')
     .replace(/\s+/g, ' ')
     .trim()
-    .replace(/[. ]+$/g, ''); // trailing dots/spaces are stripped by Windows
+    .replace(/[. ]+$/g, '');
   return cleaned.length > 0 ? cleaned : 'transcript';
 }
 
-// Content-Disposition with both an ASCII-safe `filename` fallback and an
-// RFC 5987 `filename*` so browsers display the exact Unicode file name.
 function buildContentDisposition(filename: string): string {
   const asciiFallback = filename.replace(/[^\x20-\x7e]/g, '_');
   return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
 }
 
-// PDFKit's standard fonts (Helvetica, etc.) only cover Latin glyphs, so
-// Cyrillic text renders blank unless a Unicode-capable TTF is embedded.
-// Try common install paths for a system font that covers Cyrillic across
-// the platforms this app is likely to run on (macOS dev, Windows dev,
-// Linux server deployments), and fall back to the standard font otherwise.
 const CYRILLIC_CAPABLE_REGULAR_FONTS = [
   '/System/Library/Fonts/Supplemental/Arial.ttf',
   'C:\\Windows\\Fonts\\arial.ttf',
