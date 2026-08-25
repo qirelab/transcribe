@@ -56,11 +56,19 @@ const UtilityPanel = styled(Paper)`
 
 const TopActionBar = styled(Box)`
   display: flex;
+  flex-wrap: wrap;
+  gap: 12px 16px;
   justify-content: space-between;
   align-items: center;
   padding: 16px 40px;
+  padding-right: 140px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.05);
   background: rgba(11, 15, 25, 0.3);
+
+  @media (max-width: 720px) {
+    padding: 16px 20px;
+    padding-right: 120px;
+  }
 `;
 
 const UtteranceBox = styled(Box)<{ $isActive: boolean }>`
@@ -220,8 +228,18 @@ export default function TranscriptWorkspace({
           >
             <ArrowBackIcon sx={{ fontSize: 20 }} />
           </IconButton>
-          <Box>
-            <Typography variant="h5" sx={{ fontWeight: 800 }}>
+          <Box sx={{ minWidth: 0 }}>
+            <Typography
+              variant="h5"
+              sx={{
+                fontWeight: 800,
+                maxWidth: 'clamp(70px, calc(100vw - 610px), 560px)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={record.title}
+            >
               {record.title}
             </Typography>
             <Typography variant="caption" sx={{ color: 'text.secondary' }}>
@@ -231,7 +249,7 @@ export default function TranscriptWorkspace({
           </Box>
         </Box>
 
-        <Box sx={{ display: 'flex', gap: '16px', alignItems: 'center' }}>
+        <Box sx={{ display: 'flex', gap: '16px', alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <TextField
             size="small"
             placeholder="Search transcript..."
@@ -247,7 +265,7 @@ export default function TranscriptWorkspace({
               },
             }}
             sx={{
-              width: 250,
+              width: { xs: 150, sm: 200, md: 250 },
               '& .MuiOutlinedInput-root': {
                 borderRadius: '8px',
                 backgroundColor: 'rgba(255, 255, 255, 0.02)',

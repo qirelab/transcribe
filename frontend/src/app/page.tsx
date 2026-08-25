@@ -195,7 +195,7 @@ export default function Home() {
             await logout();
             router.replace('/login');
           }}
-          sx={{ position: 'absolute', top: 16, right: 20, zIndex: 12 }}
+          sx={{ position: 'fixed', top: 25, right: 20, zIndex: 12 }}
         >
           Log out
         </Button>

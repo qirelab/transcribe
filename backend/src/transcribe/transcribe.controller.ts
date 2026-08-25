@@ -81,6 +81,41 @@ function formatSimpleTimestamp(ms: number): string {
   return `${mm}:${ss}`;
 }
 
+function sanitizeFilename(title: string): string {
+  const cleaned = title
+    .replace(/[\x00-\x1f\x7f<>:"/\\|?*]/g, '_')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/[. ]+$/g, '');
+  return cleaned.length > 0 ? cleaned : 'transcript';
+}
+
+function buildContentDisposition(filename: string): string {
+  const asciiFallback = filename.replace(/[^\x20-\x7e]/g, '_');
+  return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(filename)}`;
+}
+
+const CYRILLIC_CAPABLE_REGULAR_FONTS = [
+  '/System/Library/Fonts/Supplemental/Arial.ttf',
+  'C:\\Windows\\Fonts\\arial.ttf',
+  '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
+  '/usr/share/fonts/dejavu/DejaVuSans.ttf',
+  '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+  '/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf',
+];
+const CYRILLIC_CAPABLE_BOLD_FONTS = [
+  '/System/Library/Fonts/Supplemental/Arial Bold.ttf',
+  'C:\\Windows\\Fonts\\arialbd.ttf',
+  '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+  '/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf',
+  '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+  '/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf',
+];
+
+function resolveFirstExistingFont(paths: string[]): string | null {
+  return paths.find((p) => fs.existsSync(p)) ?? null;
+}
+
 // Helper function to format milliseconds to SRT/VTT timestamp
 function formatTimestamp(ms: number, isSrt: boolean): string {
   const seconds = Math.floor(ms / 1000);
@@ -267,7 +302,7 @@ export class TranscribeController {
     }
 
     const selectedFormat = (format || 'txt').toLowerCase();
-    const safeTitle = record.title.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+    const safeTitle = sanitizeFilename(record.title);
 
     // Map speaker ID (e.g. "A" or "1") to custom name, fallback to "Speaker A"
     const getSpeakerName = (sp: string) => {
@@ -297,7 +332,7 @@ export class TranscribeController {
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="${safeTitle}.${selectedFormat}"`,
+        buildContentDisposition(`${safeTitle}.${selectedFormat}`),
       );
       return res.send(content);
     } else if (selectedFormat === 'txt') {
@@ -313,7 +348,7 @@ export class TranscribeController {
       res.setHeader('Content-Type', 'text/plain; charset=utf-8');
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="${safeTitle}.txt"`,
+        buildContentDisposition(`${safeTitle}.txt`),
       );
       return res.send(content);
     } else if (selectedFormat === 'xlsx') {
@@ -380,7 +415,7 @@ export class TranscribeController {
       );
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="${safeTitle}.xlsx"`,
+        buildContentDisposition(`${safeTitle}.xlsx`),
       );
 
       await workbook.xlsx.write(res);
@@ -537,33 +572,35 @@ export class TranscribeController {
       );
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="${safeTitle}.docx"`,
+        buildContentDisposition(`${safeTitle}.docx`),
       );
       return res.send(buffer);
     } else if (selectedFormat === 'pdf') {
       const doc = new PDFDocument({ margin: 40, size: 'A4' });
 
-      const regularFontPath = '/System/Library/Fonts/Supplemental/Arial.ttf';
-      const boldFontPath = '/System/Library/Fonts/Supplemental/Arial Bold.ttf';
+      const regularFontPath = resolveFirstExistingFont(
+        CYRILLIC_CAPABLE_REGULAR_FONTS,
+      );
+      const boldFontPath = resolveFirstExistingFont(CYRILLIC_CAPABLE_BOLD_FONTS);
 
-      if (fs.existsSync(regularFontPath)) {
+      if (regularFontPath) {
         doc.registerFont('ArialRegular', regularFontPath);
         doc.font('ArialRegular');
       } else {
         doc.font('Helvetica');
       }
 
-      if (fs.existsSync(boldFontPath)) {
+      if (boldFontPath) {
         doc.registerFont('ArialBold', boldFontPath);
       }
 
-      if (fs.existsSync(boldFontPath)) doc.font('ArialBold');
+      if (boldFontPath) doc.font('ArialBold');
       doc
         .fontSize(20)
         .fillColor('#1E1B4B')
         .text(record.title, { ellipsis: true });
 
-      if (fs.existsSync(regularFontPath)) doc.font('ArialRegular');
+      if (regularFontPath) doc.font('ArialRegular');
       doc
         .fontSize(10)
         .fillColor('#64748B')
@@ -583,7 +620,7 @@ export class TranscribeController {
         doc.save();
 
         const timeStr = `[${formatSimpleTimestamp(u.start)}]`;
-        if (fs.existsSync(boldFontPath)) doc.font('ArialBold');
+        if (boldFontPath) doc.font('ArialBold');
         doc
           .fontSize(10)
           .fillColor('#7C3AED')
@@ -593,7 +630,7 @@ export class TranscribeController {
           .fillColor('#0F172A')
           .text(` ${getSpeakerName(u.speaker)}:`, { continued: true });
 
-        if (fs.existsSync(regularFontPath)) doc.font('ArialRegular');
+        if (regularFontPath) doc.font('ArialRegular');
         doc.fillColor('#334155').text(` ${u.text}`);
 
         doc.restore();
@@ -603,7 +640,7 @@ export class TranscribeController {
       res.setHeader('Content-Type', 'application/pdf');
       res.setHeader(
         'Content-Disposition',
-        `attachment; filename="${safeTitle}.pdf"`,
+        buildContentDisposition(`${safeTitle}.pdf`),
       );
 
       doc.pipe(res);
